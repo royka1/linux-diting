@@ -1240,6 +1240,17 @@ config TOUCHSCREEN_ST1232
 	  To compile this driver as a module, choose M here: the
 	  module will be called st1232_ts.
 
+config TOUCHSCREEN_ST_FTM5_SPI
+	tristate "STMicroelectronics FTM5 SPI touchscreen"
+	depends on SPI
+	help
+	  Say Y here to enable support for the STMicroelectronics FTM5
+	  FingerTip touchscreen controller connected over SPI, as found
+	  in the Xiaomi 12T Pro.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called st-ftm5.
+
 config TOUCHSCREEN_STMFTS
 	tristate "STMicroelectronics STMFTS touchscreen"
 	depends on I2C
