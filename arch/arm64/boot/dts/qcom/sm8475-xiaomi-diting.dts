@@ -12,6 +12,7 @@
 
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interrupt-controller/irq.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 
@@ -113,6 +114,18 @@
 			reg = <0x0 0xb8000000 0x0 0x2b00000>;
 			no-map;
 		};
+	};
+
+	/* Touchscreen analog supply, switched by TLMM 71 (vendor fts,avdd-gpio) */
+	ts_avdd: regulator-ts-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "ts_avdd";
+		gpio = <&tlmm 71 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <2000>;
+
+		pinctrl-0 = <&ts_avdd_en>;
+		pinctrl-names = "default";
 	};
 
 	vph_pwr: regulator-vph-pwr {
@@ -499,9 +512,46 @@
 	status = "okay";
 };
 
+&spi4 {
+	status = "okay";
+
+	touchscreen@0 {
+		compatible = "st,ftm5-spi";
+		reg = <0>;
+		spi-max-frequency = <12000000>;
+
+		interrupts-extended = <&tlmm 21 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 20 GPIO_ACTIVE_LOW>;
+
+		vdd-supply = <&vreg_l2c_1p8>;
+		avdd-supply = <&ts_avdd>;
+
+		/* 10x the panel resolution ("super resolution" firmware) */
+		touchscreen-size-x = <12200>;
+		touchscreen-size-y = <27120>;
+
+		pinctrl-0 = <&ts_int_reset>;
+		pinctrl-names = "default";
+	};
+};
+
 &tlmm {
 	/* Secure-world owned, per qcom,gpios-reserved in the vendor DT */
 	gpio-reserved-ranges = <28 4>, <36 4>;
+
+	ts_int_reset: ts-int-reset-state {
+		pins = "gpio20", "gpio21";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_avdd_en: ts-avdd-en-state {
+		pins = "gpio71";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
 };
 
 &ufs_mem_hc {
