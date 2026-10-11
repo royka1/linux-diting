@@ -116,6 +116,20 @@
 		};
 	};
 
+	/* Panel 1.2 V core supply, switched by TLMM 66 (vendor display_panel_vddd) */
+	panel_vddd: regulator-panel-vddd {
+		compatible = "regulator-fixed";
+		regulator-name = "panel_vddd";
+		regulator-min-microvolt = <1200000>;
+		regulator-max-microvolt = <1200000>;
+		gpio = <&tlmm 66 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
+
+		pinctrl-0 = <&panel_vddd_en>;
+		pinctrl-names = "default";
+	};
+
 	/* Touchscreen analog supply, switched by TLMM 71 (vendor fts,avdd-gpio) */
 	ts_avdd: regulator-ts-avdd {
 		compatible = "regulator-fixed";
@@ -331,10 +345,11 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l13c_2p7: ldo13 {
-			regulator-name = "vreg_l13c_2p7";
-			regulator-min-microvolt = <2700000>;
-			regulator-max-microvolt = <3544000>;
+		/* Panel vci: vendor dsi_panel_pwr_supply_L12 asks for 3.0 V */
+		vreg_l13c_3p0: ldo13 {
+			regulator-name = "vreg_l13c_3p0";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
@@ -470,6 +485,46 @@
 	};
 };
 
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&vreg_l10c_1p2>;
+	status = "okay";
+
+	panel@0 {
+		compatible = "xiaomi,l12-36-02-0b";
+		reg = <0>;
+
+		reset-gpios = <&tlmm 0 GPIO_ACTIVE_LOW>;
+
+		vddio-supply = <&vreg_l12c_1p8>;
+		vddd-supply = <&panel_vddd>;
+		vci-supply = <&vreg_l13c_3p0>;
+
+		pinctrl-0 = <&panel_reset_active>, <&panel_te>;
+		pinctrl-1 = <&panel_reset_suspend>, <&panel_te>;
+		pinctrl-names = "default", "sleep";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&mdss_dsi0_out>;
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in>;
+};
+
+&mdss_dsi0_phy {
+	vdds-supply = <&vreg_l5b_0p88>;
+	status = "okay";
+};
+
 &pm8350_gpios {
 	vol_up_n: vol-up-n-state {
 		pins = "gpio6";
@@ -544,6 +599,34 @@
 		function = "gpio";
 		drive-strength = <8>;
 		bias-pull-up;
+	};
+
+	panel_reset_active: panel-reset-active-state {
+		pins = "gpio0";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-disable;
+	};
+
+	panel_reset_suspend: panel-reset-suspend-state {
+		pins = "gpio0";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	panel_te: panel-te-state {
+		pins = "gpio86";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	panel_vddd_en: panel-vddd-en-state {
+		pins = "gpio66";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
 	};
 
 	ts_avdd_en: ts-avdd-en-state {
