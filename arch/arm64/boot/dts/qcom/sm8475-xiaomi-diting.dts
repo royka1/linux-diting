@@ -128,8 +128,10 @@
 
 &apps_rsc {
 	/*
-	 * Voltage ranges are the vendor DT constraints. Supply parents are
-	 * not described yet because the board power tree is unverified.
+	 * Minimum voltages are the vendor boot-time (qcom,init-voltage) values,
+	 * maxima the vendor DT constraints, so consumers that do not set a
+	 * voltage run at the vendor voltage instead of the range minimum.
+	 * Supply parents are not described yet (board power tree unverified).
 	 */
 	regulators-0 {
 		compatible = "qcom,pm8350-rpmh-regulators";
@@ -143,40 +145,40 @@
 
 		vreg_s11b_0p95: smps11 {
 			regulator-name = "vreg_s11b_0p95";
-			regulator-min-microvolt = <382000>;
+			regulator-min-microvolt = <952000>;
 			regulator-max-microvolt = <1170000>;
 		};
 
 		vreg_s12b_1p25: smps12 {
 			regulator-name = "vreg_s12b_1p25";
-			regulator-min-microvolt = <1224000>;
+			regulator-min-microvolt = <1256000>;
 			regulator-max-microvolt = <2040000>;
 		};
 
 		vreg_l1b_0p91: ldo1 {
 			regulator-name = "vreg_l1b_0p91";
-			regulator-min-microvolt = <830000>;
+			regulator-min-microvolt = <912000>;
 			regulator-max-microvolt = <920000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l2b_3p07: ldo2 {
 			regulator-name = "vreg_l2b_3p07";
-			regulator-min-microvolt = <2700000>;
+			regulator-min-microvolt = <3072000>;
 			regulator-max-microvolt = <3300000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l3b_0p9: ldo3 {
 			regulator-name = "vreg_l3b_0p9";
-			regulator-min-microvolt = <870000>;
+			regulator-min-microvolt = <904000>;
 			regulator-max-microvolt = <970000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l5b_0p88: ldo5 {
 			regulator-name = "vreg_l5b_0p88";
-			regulator-min-microvolt = <720000>;
+			regulator-min-microvolt = <880000>;
 			regulator-max-microvolt = <958000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -190,7 +192,7 @@
 
 		vreg_l7b_2p5: ldo7 {
 			regulator-name = "vreg_l7b_2p5";
-			regulator-min-microvolt = <2400000>;
+			regulator-min-microvolt = <2504000>;
 			regulator-max-microvolt = <3544000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -209,7 +211,7 @@
 
 		vreg_s1c_1p86: smps1 {
 			regulator-name = "vreg_s1c_1p86";
-			regulator-min-microvolt = <1800000>;
+			regulator-min-microvolt = <1880000>;
 			regulator-max-microvolt = <2024000>;
 		};
 
@@ -269,7 +271,7 @@
 
 		vreg_l6c_2p96: ldo6 {
 			regulator-name = "vreg_l6c_2p96";
-			regulator-min-microvolt = <1800000>;
+			regulator-min-microvolt = <2960000>;
 			regulator-max-microvolt = <3544000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -290,7 +292,7 @@
 
 		vreg_l9c_2p96: ldo9 {
 			regulator-name = "vreg_l9c_2p96";
-			regulator-min-microvolt = <2700000>;
+			regulator-min-microvolt = <2960000>;
 			regulator-max-microvolt = <3544000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -304,7 +306,7 @@
 
 		vreg_l11c_2p5: ldo11 {
 			regulator-name = "vreg_l11c_2p5";
-			regulator-min-microvolt = <2400000>;
+			regulator-min-microvolt = <2504000>;
 			regulator-max-microvolt = <3008000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -330,7 +332,7 @@
 
 		vreg_s3h_0p5: smps3 {
 			regulator-name = "vreg_s3h_0p5";
-			regulator-min-microvolt = <470000>;
+			regulator-min-microvolt = <504000>;
 			regulator-max-microvolt = <570000>;
 		};
 
