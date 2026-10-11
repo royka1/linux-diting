@@ -240,11 +240,14 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* always-on and boot-on in the vendor DT */
+		/*
+		 * always-on and boot-on in the vendor DT, which asks for 3.3 V;
+		 * this PLDO only has 3.296/3.304 V steps around it.
+		 */
 		vreg_l3c_3p3: ldo3 {
 			regulator-name = "vreg_l3c_3p3";
-			regulator-min-microvolt = <3300000>;
-			regulator-max-microvolt = <3300000>;
+			regulator-min-microvolt = <3296000>;
+			regulator-max-microvolt = <3304000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 			regulator-boot-on;
 			regulator-always-on;
@@ -345,12 +348,7 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		vreg_l4h_1p8: ldo4 {
-			regulator-name = "vreg_l4h_1p8";
-			regulator-min-microvolt = <1800000>;
-			regulator-max-microvolt = <1808000>;
-			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-		};
+		/* ldo4: listed in the vendor DT, but absent from this unit's cmd-db */
 	};
 
 	regulators-3 {
