@@ -686,6 +686,11 @@
 	};
 };
 
+/* Read-only RTC (Android keeps the offset in userspace); wake alarms */
+&pmk8350_rtc {
+	status = "okay";
+};
+
 &pcie0 {
 	max-link-speed = <2>;
 	status = "okay";
