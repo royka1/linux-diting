@@ -166,6 +166,9 @@ struct msm_dsi_host {
 
 	struct drm_display_mode *mode;
 	struct drm_dsc_config *dsc;
+	/* RC parameters supplied by the panel, used instead of the DSC 1.1 table */
+	struct drm_dsc_config dsc_panel_rc;
+	bool dsc_has_panel_rc;
 
 	/* connected device info */
 	unsigned int channel;
@@ -1732,8 +1735,12 @@ static int dsi_host_attach(struct mipi_dsi_host *host,
 	msm_host->lanes = dsi->lanes;
 	msm_host->format = dsi->format;
 	msm_host->mode_flags = dsi->mode_flags;
-	if (dsi->dsc)
+	if (dsi->dsc) {
 		msm_host->dsc = dsi->dsc;
+		msm_host->dsc_panel_rc = *dsi->dsc;
+		msm_host->dsc_has_panel_rc =
+			dsi->dsc->rc_range_params[0].range_max_qp != 0;
+	}
 
 	if (msm_host->format == MIPI_DSI_FMT_RGB101010) {
 		if (!msm_dsi_host_version_geq(msm_host, MSM_DSI_VER_MAJOR_6G,
@@ -1918,6 +1925,24 @@ static int dsi_populate_dsc_params(struct msm_dsi_host *msm_host, struct drm_dsc
 	if (ret) {
 		DRM_DEV_ERROR(&msm_host->pdev->dev, "could not find DSC RC parameters\n");
 		return ret;
+	}
+
+	/*
+	 * Some panel DDICs (e.g. Novatek ones set up by a vendor command) use
+	 * fixed, vendor-tuned RC parameters; the encoder has to match them.
+	 */
+	if (msm_host->dsc_has_panel_rc) {
+		const struct drm_dsc_config *rc = &msm_host->dsc_panel_rc;
+
+		memcpy(dsc->rc_range_params, rc->rc_range_params,
+		       sizeof(dsc->rc_range_params));
+		dsc->first_line_bpg_offset = rc->first_line_bpg_offset;
+		dsc->initial_offset = rc->initial_offset;
+		dsc->initial_xmit_delay = rc->initial_xmit_delay;
+		dsc->flatness_min_qp = rc->flatness_min_qp;
+		dsc->flatness_max_qp = rc->flatness_max_qp;
+		dsc->rc_quant_incr_limit0 = rc->rc_quant_incr_limit0;
+		dsc->rc_quant_incr_limit1 = rc->rc_quant_incr_limit1;
 	}
 
 	dsc->initial_scale_value = drm_dsc_initial_scale_value(dsc);
