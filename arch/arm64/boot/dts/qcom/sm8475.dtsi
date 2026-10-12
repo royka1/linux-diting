@@ -61,6 +61,16 @@
 	compatible = "qcom,sm8475-dispcc";
 };
 
+/*
+ * MSIs from the endpoint never reach the GIC ITS on SM8475 (the vendor kernel
+ * uses SPI-based MSI as well): ath11k's MHI boot times out. Use the
+ * controller's own MSI interrupts.
+ */
+&pcie0 {
+	/delete-property/ msi-map;
+	/delete-property/ msi-map-mask;
+};
+
 /* SM8475 PCIe0 has a V6 gen3x2 PHY wired as one lane */
 &pcie0_phy {
 	compatible = "qcom,sm8475-qmp-gen3x1-pcie-phy";
