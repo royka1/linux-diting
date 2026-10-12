@@ -952,6 +952,17 @@
 };
 
 / {
+	/*
+	 * Battery, charger and USB-C state come from the ADSP firmware
+	 * (vendor pmic_glink: battery_charger, ucsi). No connector yet: the
+	 * USB port stays a fixed peripheral for the debug link.
+	 */
+	pmic-glink {
+		compatible = "qcom,sm8450-pmic-glink", "qcom,pmic-glink";
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
 	aliases {
 		serial1 = &uart20;	/* qcom_geni_serial needs a line number */
 	};
