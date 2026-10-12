@@ -936,8 +936,8 @@ int audioreach_set_module_config_late(struct q6apm_graph *graph,
 
 /*
  * order of use: GRAPH_OPEN, SET, PERSISTENT, SET_LATE; PLAYBACK_LINKS is a
- * graph open command with links to the playback device graph, sent when a
- * hostless graph is prepared for playback (that device graph exists then)
+ * graph open command with links to the playback device graph, sent when the
+ * back end has opened that device graph and before it prepares it
  */
 #define AR_MODULE_CFG_SET		0
 #define AR_MODULE_CFG_PERSISTENT	1

@@ -141,6 +141,7 @@ int q6apm_graph_flush(struct q6apm_graph *graph);
 /* Media Format */
 bool q6apm_graph_is_hostless(struct q6apm_graph *graph);
 int q6apm_graph_hostless_config(struct q6apm_graph *graph, int dir);
+int q6apm_graph_open_peer_links(struct q6apm_graph *dev_graph);
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph,
 				 struct audioreach_module_config *cfg);
 

@@ -210,6 +210,12 @@ static int q6apm_lpass_dai_prepare(struct snd_pcm_substream *substream, struct s
 			return rc;
 		}
 		dai_data->graph[graph_id] = graph;
+
+		rc = q6apm_graph_open_peer_links(graph);
+		if (rc) {
+			dev_err(dai->dev, "Failed to link graph %d: %d\n", graph_id, rc);
+			goto err;
+		}
 	}
 
 	cfg->direction = substream->stream;

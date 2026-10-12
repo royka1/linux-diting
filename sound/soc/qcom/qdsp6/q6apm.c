@@ -690,9 +690,8 @@ EXPORT_SYMBOL_GPL(q6apm_graph_is_hostless);
  * command per parameter; a link the device modules do not support is
  * reported and skipped.
  */
-static int q6apm_graph_open_playback_links(struct q6apm_graph *graph)
+static int q6apm_open_playback_links(struct q6apm *apm, struct audioreach_graph_info *info)
 {
-	struct audioreach_graph_info *info = graph->info;
 	struct audioreach_container *container;
 	struct audioreach_module *module;
 	struct audioreach_sub_graph *sgs;
@@ -716,9 +715,9 @@ static int q6apm_graph_open_playback_links(struct q6apm_graph *graph)
 					if (IS_ERR(pkt))
 						return PTR_ERR(pkt);
 					memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, pd, len);
-					ret = q6apm_send_cmd_sync(graph->apm, pkt, 0);
+					ret = q6apm_send_cmd_sync(apm, pkt, 0);
 					if (ret == -EINVAL)
-						dev_warn(graph->dev, "playback link %zu of 0x%x rejected\n",
+						dev_warn(apm->dev, "playback link %zu of 0x%x rejected\n",
 							 off, module->instance_id);
 					else if (ret)
 						return ret;
@@ -729,6 +728,49 @@ static int q6apm_graph_open_playback_links(struct q6apm_graph *graph)
 
 	return 0;
 }
+
+static bool q6apm_graph_info_has_playback_links(struct audioreach_graph_info *info)
+{
+	struct audioreach_container *container;
+	struct audioreach_module *module;
+	struct audioreach_sub_graph *sgs;
+
+	list_for_each_entry(sgs, &info->sg_list, node)
+		list_for_each_entry(container, &sgs->container_list, node)
+			list_for_each_entry(module, &container->modules_list, node)
+				if (module->cfg_size[AR_MODULE_CFG_PLAYBACK_LINKS])
+					return true;
+	return false;
+}
+
+/*
+ * Called by the back end right after it opened a playback device graph and
+ * before preparing it: the device endpoint creates the control ports for
+ * links of an already open hostless (voice) graph only in that state.
+ */
+int q6apm_graph_open_peer_links(struct q6apm_graph *dev_graph)
+{
+	struct q6apm *apm = dev_graph->apm;
+	struct audioreach_graph_info *info = NULL;
+	struct audioreach_graph *ar_graph;
+	int id;
+
+	mutex_lock(&apm->lock);
+	idr_for_each_entry(&apm->graph_idr, ar_graph, id) {
+		if (ar_graph->id != dev_graph->id &&
+		    q6apm_graph_info_has_playback_links(ar_graph->info)) {
+			info = ar_graph->info;
+			break;
+		}
+	}
+	mutex_unlock(&apm->lock);
+
+	if (!info)
+		return 0;
+
+	return q6apm_open_playback_links(apm, info);
+}
+EXPORT_SYMBOL_GPL(q6apm_graph_open_peer_links);
 
 int q6apm_graph_hostless_config(struct q6apm_graph *graph, int dir)
 {
@@ -746,12 +788,6 @@ int q6apm_graph_hostless_config(struct q6apm_graph *graph, int dir)
 					return ret;
 			}
 		}
-	}
-
-	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
-		ret = q6apm_graph_open_playback_links(graph);
-		if (ret)
-			return ret;
 	}
 
 	/* e.g. VCPM: the session (VSID) first, then its calibration tables */
