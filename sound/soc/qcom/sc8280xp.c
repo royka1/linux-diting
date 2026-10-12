@@ -40,6 +40,9 @@ static int sc8280xp_mi2s_index(unsigned int dai_id)
 		return (dai_id - PRIMARY_MI2S_RX) / 2;
 	case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
 		return 4;
+	/* TDM on the same serial interface uses the same bit clock and codecs */
+	case PRIMARY_TDM_RX_0...QUINARY_TDM_TX_7:
+		return (dai_id - PRIMARY_TDM_RX_0) / 16;
 	default:
 		return -1;
 	}
@@ -58,6 +61,8 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 	switch (cpu_dai->id) {
 	case PRIMARY_MI2S_RX...QUATERNARY_MI2S_TX:
 	case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
+	/* TDM framed like I2S (from the topology) for the same codecs */
+	case PRIMARY_TDM_RX_0...QUINARY_TDM_TX_7:
 		snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_BP_FP);
 		/*
 		 * The DSP provides bit clock and frame sync; codecs follow.

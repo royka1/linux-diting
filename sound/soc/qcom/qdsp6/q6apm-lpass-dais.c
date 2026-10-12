@@ -313,6 +313,8 @@ static int q6apm_lpass_dai_dev_probe(struct platform_device *pdev)
 
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.q6i2s_ops = &q6i2s_ops;
+	/* the TDM framing comes with the endpoint module's topology config */
+	cfg.q6tdm_ops = &q6i2s_ops;
 	cfg.q6dma_ops = &q6dma_ops;
 	cfg.q6hdmi_ops = &q6hdmi_ops;
 	dais = q6dsp_audio_ports_set_config(dev, &cfg, &num_dais);

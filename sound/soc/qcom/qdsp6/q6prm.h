@@ -16,6 +16,10 @@
 /* Clock ID for Tertiary I2S EBIT */
 #define Q6PRM_LPASS_CLK_ID_TER_MI2S_EBIT                          0x105
 /* Clock ID for Quartnery I2S IBIT */
+/* Clock ID for tertiary TDM bit clock (internal), 516 in the vendor log */
+#define Q6PRM_LPASS_CLK_ID_TER_TDM_IBIT                           0x204
+/* Clock ID for tertiary TDM bit clock (external) */
+#define Q6PRM_LPASS_CLK_ID_TER_TDM_EBIT                           0x205
 #define Q6PRM_LPASS_CLK_ID_QUAD_MI2S_IBIT                         0x106
 /* Clock ID for Quartnery I2S EBIT */
 #define Q6PRM_LPASS_CLK_ID_QUAD_MI2S_EBIT                         0x107
