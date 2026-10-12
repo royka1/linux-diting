@@ -429,6 +429,42 @@ xiaomi_l12_create_backlight(struct mipi_dsi_device *dsi)
 					      &xiaomi_l12_bl_ops, &props);
 }
 
+/*
+ * The DDIC decodes with fixed Novatek-tuned rate control parameters (vendor
+ * sde_dsc_helper.c: DSC 1.1 SCR, 10 bpc / 8 bpp, "nvt" min/max QP and BPG
+ * tables, first_line_bpg_offset 13 as used for NT37705-class panels). The
+ * vendor 0x91 command is derived from the same values. The host encoder has
+ * to use them as well.
+ */
+static void xiaomi_l12_set_rc_params(struct drm_dsc_config *dsc)
+{
+	static const u8 min_qp[DSC_NUM_BUF_RANGES] = {
+		0, 4, 5, 5, 7, 7, 7, 7, 7, 8, 9, 9, 9, 12, 16
+	};
+	static const u8 max_qp[DSC_NUM_BUF_RANGES] = {
+		8, 8, 9, 10, 11, 11, 11, 12, 13, 14, 14, 15, 15, 16, 17
+	};
+	static const s8 bpg_offset[DSC_NUM_BUF_RANGES] = {
+		2, 0, 0, -2, -4, -6, -8, -8, -8, -10, -10, -10, -12, -12, -12
+	};
+	int i;
+
+	for (i = 0; i < DSC_NUM_BUF_RANGES; i++) {
+		dsc->rc_range_params[i].range_min_qp = min_qp[i];
+		dsc->rc_range_params[i].range_max_qp = max_qp[i];
+		/* 6-bit two's complement, as in the PPS */
+		dsc->rc_range_params[i].range_bpg_offset =
+			bpg_offset[i] & DSC_RANGE_BPG_OFFSET_MASK;
+	}
+	dsc->first_line_bpg_offset = 13;
+	dsc->initial_offset = 6144;
+	dsc->initial_xmit_delay = 512;
+	dsc->flatness_min_qp = 7;
+	dsc->flatness_max_qp = 16;
+	dsc->rc_quant_incr_limit0 = 15;
+	dsc->rc_quant_incr_limit1 = 15;
+}
+
 static int xiaomi_l12_probe(struct mipi_dsi_device *dsi)
 {
 	struct device *dev = &dsi->dev;
@@ -485,6 +521,7 @@ static int xiaomi_l12_probe(struct mipi_dsi_device *dsi)
 	ctx->dsc.bits_per_component = 10;
 	ctx->dsc.bits_per_pixel = 8 << 4; /* 4 fractional bits */
 	ctx->dsc.block_pred_enable = true;
+	xiaomi_l12_set_rc_params(&ctx->dsc);
 
 	return devm_mipi_dsi_attach(dev, dsi);
 }
