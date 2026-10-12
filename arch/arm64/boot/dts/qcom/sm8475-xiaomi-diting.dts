@@ -10,6 +10,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/interrupt-controller/irq.h>
@@ -145,6 +146,19 @@
 		 * failed mainline boot can be read back from Android's
 		 * /sys/fs/pstore after a warm reboot.
 		 */
+		/*
+		 * Remote heap of the ADSP audio PD, which loads the dynamic
+		 * AudioReach modules (e.g. Fluence ECNS); vendor
+		 * adsp_heap_region: 12 MiB below 4 GiB.
+		 */
+		adsp_rpc_remote_heap_mem: adsp-rpc-remote-heap {
+			compatible = "shared-dma-pool";
+			alloc-ranges = <0x0 0x0 0x0 0xffffffff>;
+			reusable;
+			alignment = <0x0 0x400000>;
+			size = <0x0 0xc00000>;
+		};
+
 		ramoops@a7000000 {
 			compatible = "ramoops";
 			reg = <0x0 0xa7000000 0x0 0x400000>;
@@ -550,6 +564,14 @@
 	/* squashed from the vendor firmware_mnt adsp.mdt + adsp.bNN */
 	firmware-name = "qcom/sm8475/xiaomi/diting/adsp.mbn";
 	status = "okay";
+
+	glink-edge {
+		fastrpc {
+			/* vendor: qcom,adsp-remoteheap-vmid = <LPASS ADSP_HEAP> */
+			memory-region = <&adsp_rpc_remote_heap_mem>;
+			qcom,vmids = <QCOM_SCM_VMID_LPASS QCOM_SCM_VMID_ADSP_HEAP>;
+		};
+	};
 };
 
 &gpu {
