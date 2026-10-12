@@ -92,6 +92,20 @@
 			no-map;
 		};
 
+		/*
+		 * Modem EFS shared memory (vendor qcom,rmtfs_sharedmem: 0x280000,
+		 * client-id 1, placed at runtime). The address is the one the
+		 * sm8450-mainline diting DTS uses; it is plain RAM on this unit.
+		 */
+		rmtfs_mem: memory@f8700000 {
+			compatible = "qcom,rmtfs-mem";
+			reg = <0x0 0xf8700000 0x0 0x280000>;
+			no-map;
+
+			qcom,client-id = <1>;
+			qcom,vmid = <QCOM_SCM_VMID_MSS_MSA>;
+		};
+
 		adsp_mem: memory@9fd00000 {
 			reg = <0x0 0x9fd00000 0x0 0x3100000>;
 			no-map;
@@ -487,6 +501,12 @@
 		pinctrl-0 = <&eusb2_reset_n>;
 		pinctrl-names = "default";
 	};
+};
+
+&remoteproc_mpss {
+	/* squashed from the vendor firmware_mnt modem.mdt + modem.bNN */
+	firmware-name = "qcom/sm8475/xiaomi/diting/modem.mbn";
+	status = "okay";
 };
 
 &remoteproc_adsp {
