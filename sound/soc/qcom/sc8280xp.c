@@ -4,6 +4,7 @@
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <linux/clk.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
@@ -128,7 +129,15 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	case TX_CODEC_DMA_TX_0:
 	case TX_CODEC_DMA_TX_1:
 	case TX_CODEC_DMA_TX_2:
+		channels->min = 1;
+		break;
+	/*
+	 * Two microphones (e.g. Xiaomi Diting AMIC1 + AMIC5): keep both
+	 * channels, the voice call's dual-mic noise suppression needs them.
+	 */
 	case TX_CODEC_DMA_TX_3:
+		if (of_machine_is_compatible("xiaomi,diting"))
+			break;
 		channels->min = 1;
 		break;
 	default:
