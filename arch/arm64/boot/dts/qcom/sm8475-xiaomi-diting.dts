@@ -47,6 +47,34 @@
 	 * to a copy of the DTB by the boot image tooling instead.
 	 */
 
+	/*
+	 * WCD938x: the two analog microphones (AMIC1 bottom, AMIC5 top per the
+	 * vendor mixer paths). Micbias 2.75 V, supplies, reset and SoundWire
+	 * devices as in the vendor DT; there is no headphone jack.
+	 */
+	wcd938x: audio-codec {
+		compatible = "qcom,wcd9385-codec";
+
+		pinctrl-0 = <&wcd_default>;
+		pinctrl-names = "default";
+
+		qcom,micbias1-microvolt = <2750000>;
+		qcom,micbias2-microvolt = <2750000>;
+		qcom,micbias3-microvolt = <2750000>;
+		qcom,micbias4-microvolt = <2750000>;
+		qcom,rx-device = <&wcd_rx>;
+		qcom,tx-device = <&wcd_tx>;
+
+		reset-gpios = <&tlmm 43 GPIO_ACTIVE_LOW>;
+
+		vdd-buck-supply = <&vreg_s10b_1p8>;
+		vdd-rxtx-supply = <&vreg_s10b_1p8>;
+		vdd-io-supply = <&vreg_s10b_1p8>;
+		vdd-mic-bias-supply = <&vreg_bob>;
+
+		#sound-dai-cells = <1>;
+	};
+
 	chosen {
 		#address-cells = <2>;
 		#size-cells = <2>;
@@ -698,6 +726,11 @@
 	clocks = <&q6prmcc LPASS_CLK_ID_TER_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
 	clock-names = "tertiary-mi2s";
 
+	audio-routing = "AMIC1", "MIC BIAS1",
+			"AMIC5", "MIC BIAS4",
+			"TX SWR_INPUT0", "ADC1_OUTPUT",
+			"TX SWR_INPUT1", "ADC4_OUTPUT";
+
 	speaker-playback-dai-link {
 		link-name = "Speaker Playback";
 
@@ -713,6 +746,58 @@
 			sound-dai = <&q6apm>;
 		};
 	};
+
+	mic-capture-dai-link {
+		link-name = "Mic Capture";
+
+		cpu {
+			sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>;
+		};
+
+		codec {
+			sound-dai = <&wcd938x 1>, <&swr2 0>, <&txmacro 0>;
+		};
+
+		platform {
+			sound-dai = <&q6apm>;
+		};
+	};
+};
+
+&lpass_tlmm {
+	status = "okay";
+};
+
+&rxmacro {
+	status = "okay";
+};
+
+&swr1 {
+	status = "okay";
+
+	wcd_rx: codec@0,4 {
+		compatible = "sdw20217010d00";
+		reg = <0 4>;
+		qcom,rx-port-mapping = <1 2 3 4 5>;
+	};
+};
+
+&swr2 {
+	status = "okay";
+
+	wcd_tx: codec@0,3 {
+		compatible = "sdw20217010d00";
+		reg = <0 3>;
+		qcom,tx-port-mapping = <1 1 2 3>;
+	};
+};
+
+&txmacro {
+	status = "okay";
+};
+
+&vamacro {
+	status = "okay";
 };
 
 /* Read-only RTC (Android keeps the offset in userspace); wake alarms */
@@ -796,6 +881,14 @@
 	 * gpio52 (vendor spk-sw-gpios); low selects the loudspeaker, as Android
 	 * does for media playback ("Spksw Gpio Switch" Off).
 	 */
+	wcd_default: wcd-reset-n-active-state {
+		pins = "gpio43";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+		output-low;
+	};
+
 	spk_amp_t_rcv_off: spk-amp-t-rcv-off-state {
 		pins = "gpio52";
 		function = "gpio";
