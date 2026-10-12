@@ -485,6 +485,12 @@
 	};
 };
 
+&remoteproc_adsp {
+	/* squashed from the vendor firmware_mnt adsp.mdt + adsp.bNN */
+	firmware-name = "qcom/sm8475/xiaomi/diting/adsp.mbn";
+	status = "okay";
+};
+
 &gpu {
 	status = "okay";
 
