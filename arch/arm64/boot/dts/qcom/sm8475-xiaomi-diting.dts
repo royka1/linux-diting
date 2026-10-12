@@ -485,6 +485,14 @@
 	};
 };
 
+&gpu {
+	status = "okay";
+
+	zap-shader {
+		firmware-name = "qcom/sm8475/xiaomi/diting/a730_zap.mbn";
+	};
+};
+
 &mdss {
 	status = "okay";
 };
