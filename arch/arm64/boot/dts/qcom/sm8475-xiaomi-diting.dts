@@ -608,6 +608,52 @@
 	};
 };
 
+/* Loudspeaker amplifiers: Android I2C bus 2 = QUP SE15 */
+&i2c15 {
+	clock-frequency = <100000>;
+	status = "okay";
+
+	/* vendor cs35l41@40 */
+	spk_amp_b: speaker-amp@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		interrupts-extended = <&tlmm 63 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 3 GPIO_ACTIVE_HIGH>;
+		pinctrl-0 = <&spk_amp_b_reset>, <&spk_amp_b_irq>;
+		pinctrl-names = "default";
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4000>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+		cirrus,subsystem-id = "diting";
+		sound-name-prefix = "B";
+		#sound-dai-cells = <1>;
+	};
+
+	/* vendor cs35l41@42 */
+	spk_amp_t: speaker-amp@42 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x42>;
+		interrupts-extended = <&tlmm 88 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 1 GPIO_ACTIVE_HIGH>;
+		pinctrl-0 = <&spk_amp_t_reset>, <&spk_amp_t_irq>, <&spk_amp_t_rcv_off>;
+		pinctrl-names = "default";
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <4000>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		cirrus,asp-sdout-hiz = <3>;
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+		cirrus,subsystem-id = "diting";
+		sound-name-prefix = "T";
+		#sound-dai-cells = <1>;
+	};
+};
+
 &pcie0 {
 	max-link-speed = <2>;
 	status = "okay";
@@ -664,6 +710,47 @@
 &tlmm {
 	/* Secure-world owned, per qcom,gpios-reserved in the vendor DT */
 	gpio-reserved-ranges = <28 4>, <36 4>;
+
+	spk_amp_b_reset: spk-amp-b-reset-state {
+		pins = "gpio3";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	spk_amp_t_reset: spk-amp-t-reset-state {
+		pins = "gpio1";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	/*
+	 * The top amplifier also drives the earpiece through a switch on
+	 * gpio52 (vendor spk-sw-gpios); low selects the loudspeaker, as Android
+	 * does for media playback ("Spksw Gpio Switch" Off).
+	 */
+	spk_amp_t_rcv_off: spk-amp-t-rcv-off-state {
+		pins = "gpio52";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+		output-low;
+	};
+
+	spk_amp_b_irq: spk-amp-b-irq-state {
+		pins = "gpio63";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	spk_amp_t_irq: spk-amp-t-irq-state {
+		pins = "gpio88";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
 
 	bt_en: bt-en-state {
 		pins = "gpio81";
