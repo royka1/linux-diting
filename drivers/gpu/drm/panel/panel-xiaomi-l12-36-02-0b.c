@@ -20,6 +20,9 @@
 
 #include <drm/display/drm_dsc.h>
 #include <drm/display/drm_dsc_helper.h>
+#include <drm/drm_atomic.h>
+#include <drm/drm_connector.h>
+#include <drm/drm_crtc.h>
 #include <drm/drm_mipi_dsi.h>
 #include <drm/drm_modes.h>
 #include <drm/drm_panel.h>
@@ -32,6 +35,7 @@ struct xiaomi_l12 {
 	struct drm_panel panel;
 	struct mipi_dsi_device *dsi;
 	struct drm_dsc_config dsc;
+	struct drm_connector *connector;
 	struct gpio_desc *reset_gpio;
 	struct regulator *vddio;
 	struct regulator *vddd;
@@ -308,11 +312,114 @@ static int xiaomi_l12_off(struct xiaomi_l12 *ctx)
 	return dsi_ctx.accum_err;
 }
 
+/*
+ * Command mode: the horizontal "porches" only stand for transfer overhead
+ * and set the DSI link rate. The vendor drives the link at 1.1 Gbit/s per
+ * lane for all refresh rates (qcom,mdss-dsi-panel-clockrate, frame transfer
+ * in 7.3 ms). The msm host derives the link rate from the mode clock with
+ * the DSC-compressed width (1220 * 8 / 30 = 326 pixels per line), so the
+ * front porch of each mode is sized to land at that rate.
+ */
+#define XIAOMI_L12_VTOTAL	(2712 + 24 + 4 + 16)
+#define XIAOMI_L12_PCLK		146666667	/* 1.1 Gbit/s * 4 lanes / 30 bpp */
+#define XIAOMI_L12_HFP(fps)	(XIAOMI_L12_PCLK / (XIAOMI_L12_VTOTAL * (fps)) - \
+				 326 - 16 - 86)
+#define XIAOMI_L12_MODE(fps, preferred) {					\
+	.clock = (1220 + XIAOMI_L12_HFP(fps) + 16 + 86) *			\
+		 XIAOMI_L12_VTOTAL * (fps) / 1000,				\
+	.hdisplay = 1220,							\
+	.hsync_start = 1220 + XIAOMI_L12_HFP(fps),				\
+	.hsync_end = 1220 + XIAOMI_L12_HFP(fps) + 16,				\
+	.htotal = 1220 + XIAOMI_L12_HFP(fps) + 16 + 86,				\
+	.vdisplay = 2712,							\
+	.vsync_start = 2712 + 24,						\
+	.vsync_end = 2712 + 24 + 4,						\
+	.vtotal = XIAOMI_L12_VTOTAL,						\
+	.width_mm = 70,								\
+	.height_mm = 155,							\
+	.type = DRM_MODE_TYPE_DRIVER | (preferred),				\
+}
+
+/* Vendor qcom,mdss-dsi-timing-switch-command per refresh rate */
+struct xiaomi_l12_mode {
+	struct drm_display_mode mode;
+	u8 rate[2];		/* 0x2f: frame rate select */
+	u8 e2_0[5];		/* 0xe2 */
+	u8 e2_12[3];		/* 0xe2 at offset 0x12 */
+	u8 ea_0[9];		/* 0xea */
+	u8 ea_17[4];		/* 0xea at offset 0x17 */
+};
+
+static const struct xiaomi_l12_mode xiaomi_l12_modes[] = {
+	{
+		.mode = XIAOMI_L12_MODE(60, DRM_MODE_TYPE_PREFERRED),
+		.rate = { 0x2f, 0x00 },
+		.e2_0 = { 0xe2, 0x88, 0xe0, 0xcc, 0x0c },
+		.e2_12 = { 0xe2, 0x86, 0x01 },
+		.ea_0 = { 0xea, 0x02, 0x00, 0xe0, 0x00, 0xe0, 0x70, 0x00, 0x70 },
+		.ea_17 = { 0xea, 0x80, 0x00, 0x80 },
+	}, {
+		.mode = XIAOMI_L12_MODE(90, 0),
+		.rate = { 0x2f, 0x01 },
+		.e2_0 = { 0xe2, 0x42, 0xee, 0x04, 0x20 },
+		.e2_12 = { 0xe2, 0xfd, 0x03 },
+		.ea_0 = { 0xea, 0x02, 0x00, 0xb8, 0x00, 0xb8, 0x58, 0x00, 0x58 },
+		.ea_17 = { 0xea, 0x48, 0x00, 0x48 },
+	}, {
+		.mode = XIAOMI_L12_MODE(120, 0),
+		.rate = { 0x2f, 0x02 },
+		.e2_0 = { 0xe2, 0xd6, 0x4e, 0x84, 0x88 },
+		.e2_12 = { 0xe2, 0xfd, 0x03 },
+		.ea_0 = { 0xea, 0x02, 0x00, 0xe0, 0x00, 0xe0, 0x80, 0x00, 0x80 },
+		.ea_17 = { 0xea, 0x38, 0x00, 0x38 },
+	},
+};
+
+static const struct xiaomi_l12_mode *xiaomi_l12_current_mode(struct xiaomi_l12 *ctx)
+{
+	struct drm_connector *connector = ctx->connector;
+	struct drm_crtc_state *crtc_state;
+	int i;
+
+	if (!connector || !connector->state || !connector->state->crtc)
+		return &xiaomi_l12_modes[0];
+
+	crtc_state = connector->state->crtc->state;
+	for (i = 0; i < ARRAY_SIZE(xiaomi_l12_modes); i++)
+		if (drm_mode_match(&crtc_state->mode, &xiaomi_l12_modes[i].mode,
+				   DRM_MODE_MATCH_TIMINGS | DRM_MODE_MATCH_CLOCK))
+			return &xiaomi_l12_modes[i];
+
+	return &xiaomi_l12_modes[0];
+}
+
+static int xiaomi_l12_set_rate(struct xiaomi_l12 *ctx,
+			       const struct xiaomi_l12_mode *m)
+{
+	struct mipi_dsi_multi_context dsi_ctx_ = { .dsi = ctx->dsi };
+	struct mipi_dsi_multi_context *dsi_ctx = &dsi_ctx_;
+
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, m->rate, sizeof(m->rate));
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x08);
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xe0, 0x01);
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, m->e2_0, sizeof(m->e2_0));
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x6f, 0x12);
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, m->e2_12, sizeof(m->e2_12));
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, m->ea_0, sizeof(m->ea_0));
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0x6f, 0x17);
+	mipi_dsi_dcs_write_buffer_multi(dsi_ctx, m->ea_17, sizeof(m->ea_17));
+	/* back to the standard command page */
+	mipi_dsi_dcs_write_seq_multi(dsi_ctx, 0xf0, 0x55, 0xaa, 0x52, 0x08, 0x00);
+
+	return dsi_ctx->accum_err;
+}
+
 static int xiaomi_l12_prepare(struct drm_panel *panel)
 {
 	struct xiaomi_l12 *ctx = to_xiaomi_l12(panel);
 	struct device *dev = &ctx->dsi->dev;
 	struct drm_dsc_picture_parameter_set pps;
+	const struct xiaomi_l12_mode *mode;
 	int ret;
 
 	ret = xiaomi_l12_power_on(ctx);
@@ -343,6 +450,16 @@ static int xiaomi_l12_prepare(struct drm_panel *panel)
 		goto err_off;
 	}
 
+	/* on() sets up 60 Hz; switch like the vendor driver does at runtime */
+	mode = xiaomi_l12_current_mode(ctx);
+	if (mode != &xiaomi_l12_modes[0]) {
+		ret = xiaomi_l12_set_rate(ctx, mode);
+		if (ret < 0) {
+			dev_err(dev, "failed to set refresh rate: %d\n", ret);
+			goto err_off;
+		}
+	}
+
 	msleep(28);
 
 	return 0;
@@ -370,25 +487,27 @@ static int xiaomi_l12_unprepare(struct drm_panel *panel)
 }
 
 /* First vendor timing (60 Hz); 90/120 Hz modes are not described yet. */
-static const struct drm_display_mode xiaomi_l12_mode = {
-	.clock = (1220 + 16 + 16 + 86) * (2712 + 24 + 4 + 16) * 60 / 1000,
-	.hdisplay = 1220,
-	.hsync_start = 1220 + 16,
-	.hsync_end = 1220 + 16 + 16,
-	.htotal = 1220 + 16 + 16 + 86,
-	.vdisplay = 2712,
-	.vsync_start = 2712 + 24,
-	.vsync_end = 2712 + 24 + 4,
-	.vtotal = 2712 + 24 + 4 + 16,
-	.width_mm = 70,
-	.height_mm = 155,
-	.type = DRM_MODE_TYPE_DRIVER,
-};
-
 static int xiaomi_l12_get_modes(struct drm_panel *panel,
 				struct drm_connector *connector)
 {
-	return drm_connector_helper_get_modes_fixed(connector, &xiaomi_l12_mode);
+	struct xiaomi_l12 *ctx = to_xiaomi_l12(panel);
+	struct drm_display_mode *mode;
+	int i;
+
+	ctx->connector = connector;
+
+	for (i = 0; i < ARRAY_SIZE(xiaomi_l12_modes); i++) {
+		mode = drm_mode_duplicate(connector->dev, &xiaomi_l12_modes[i].mode);
+		if (!mode)
+			return -ENOMEM;
+		drm_mode_set_name(mode);
+		drm_mode_probed_add(connector, mode);
+	}
+
+	connector->display_info.width_mm = xiaomi_l12_modes[0].mode.width_mm;
+	connector->display_info.height_mm = xiaomi_l12_modes[0].mode.height_mm;
+
+	return ARRAY_SIZE(xiaomi_l12_modes);
 }
 
 static const struct drm_panel_funcs xiaomi_l12_panel_funcs = {
