@@ -503,6 +503,15 @@
 	};
 };
 
+&ipa {
+	qcom,gsi-loader = "self";
+	/* vendor: ipa_fws (PAS 15) is loaded into ipa_gsi_region@8b910000 */
+	memory-region = <&ipa_gsi_mem>;
+	firmware-name = "qcom/sm8475/xiaomi/diting/ipa_fws.mbn";
+
+	status = "okay";
+};
+
 &remoteproc_mpss {
 	/* squashed from the vendor firmware_mnt modem.mdt + modem.bNN */
 	firmware-name = "qcom/sm8475/xiaomi/diting/modem.mbn";
