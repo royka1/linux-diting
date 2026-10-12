@@ -68,6 +68,24 @@ properties:
     $ref: /schemas/types.yaml#/definitions/string
     description: User visible long sound card name
 
+  clocks:
+    minItems: 1
+    maxItems: 5
+    description:
+      DSP bit clocks of MI2S ports whose codecs need the clock running before
+      they are powered up (e.g. amplifiers locking a PLL to it).
+
+  clock-names:
+    minItems: 1
+    maxItems: 5
+    items:
+      enum:
+        - primary-mi2s
+        - secondary-mi2s
+        - tertiary-mi2s
+        - quaternary-mi2s
+        - quinary-mi2s
+
 patternProperties:
   ".*-dai-link$":
     description:

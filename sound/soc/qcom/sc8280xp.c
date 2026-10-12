@@ -2,6 +2,7 @@
 // Copyright (c) 2022, Linaro Limited
 
 #include <dt-bindings/sound/qcom,q6afe.h>
+#include <linux/clk.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <sound/soc.h>
@@ -21,7 +22,28 @@ struct sc8280xp_snd_data {
 	struct snd_soc_jack jack;
 	struct snd_soc_jack dp_jack[8];
 	bool jack_setup;
+	/* optional DSP bit clocks of the MI2S ports, enabled before the codecs */
+	struct clk *mi2s_clk[5];
+	unsigned int mi2s_bclk[5];
+	bool mi2s_clk_on[5];
 };
+
+static const char * const sc8280xp_mi2s_clk_names[] = {
+	"primary-mi2s", "secondary-mi2s", "tertiary-mi2s",
+	"quaternary-mi2s", "quinary-mi2s",
+};
+
+static int sc8280xp_mi2s_index(unsigned int dai_id)
+{
+	switch (dai_id) {
+	case PRIMARY_MI2S_RX...QUATERNARY_MI2S_TX:
+		return (dai_id - PRIMARY_MI2S_RX) / 2;
+	case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
+		return 4;
+	default:
+		return -1;
+	}
+}
 
 static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 {
@@ -30,11 +52,27 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 	struct snd_soc_card *card = rtd->card;
 	struct snd_soc_jack *dp_jack  = NULL;
 	int dp_pcm_id = 0;
+	struct snd_soc_dai *codec_dai;
+	int i;
 
 	switch (cpu_dai->id) {
 	case PRIMARY_MI2S_RX...QUATERNARY_MI2S_TX:
 	case QUINARY_MI2S_RX...QUINARY_MI2S_TX:
 		snd_soc_dai_set_fmt(cpu_dai, SND_SOC_DAIFMT_BP_FP);
+		/*
+		 * The DSP provides bit clock and frame sync; codecs follow.
+		 * With several codecs on one link (e.g. a pair of speaker
+		 * amplifiers), codec N takes slot N: left, right, ...
+		 */
+		for_each_rtd_codec_dais(rtd, i, codec_dai) {
+			unsigned int slot = i;
+
+			snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_CBC_CFC |
+					    SND_SOC_DAIFMT_I2S |
+					    SND_SOC_DAIFMT_NB_NF);
+			if (rtd->dai_link->num_codecs > 1)
+				snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 1, &slot);
+		}
 		break;
 	case WSA_CODEC_DMA_RX_0:
 	case WSA_CODEC_DMA_RX_1:
@@ -96,11 +134,64 @@ static int sc8280xp_be_hw_params_fixup(struct snd_soc_pcm_runtime *rtd,
 	return 0;
 }
 
+/*
+ * MI2S codecs that clock themselves from the bit clock (e.g. CS35L41 speaker
+ * amplifiers) need its rate. Codecs without such a clock return -ENOTSUPP.
+ */
+static int sc8280xp_snd_hw_params(struct snd_pcm_substream *substream,
+				  struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_dai *codec_dai;
+	int idx = sc8280xp_mi2s_index(cpu_dai->id);
+	unsigned int bclk;
+	int i, ret;
+
+	if (idx < 0)
+		return 0;
+
+	bclk = params_rate(params) * params_channels(params) *
+	       params_physical_width(params);
+	data->mi2s_bclk[idx] = bclk;
+
+	for_each_rtd_codec_dais(rtd, i, codec_dai) {
+		ret = snd_soc_component_set_sysclk(codec_dai->component, 0, 0,
+						   bclk, SND_SOC_CLOCK_IN);
+		if (ret && ret != -ENOTSUPP)
+			return ret;
+
+		ret = snd_soc_dai_set_sysclk(codec_dai, 0, bclk, SND_SOC_CLOCK_IN);
+		if (ret && ret != -ENOTSUPP)
+			return ret;
+	}
+
+	return 0;
+}
+
 static int sc8280xp_snd_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
 	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
+	int idx = sc8280xp_mi2s_index(cpu_dai->id);
+	int ret;
+
+	/*
+	 * The DSP starts the MI2S clocks only when the graph starts, after
+	 * DAPM has powered up the codecs. Codecs that lock a PLL to the bit
+	 * clock need it earlier: vote for it here.
+	 */
+	if (idx >= 0 && data->mi2s_clk[idx] && !data->mi2s_clk_on[idx]) {
+		ret = clk_set_rate(data->mi2s_clk[idx], data->mi2s_bclk[idx]);
+		if (ret)
+			return ret;
+		ret = clk_prepare_enable(data->mi2s_clk[idx]);
+		if (ret)
+			return ret;
+		data->mi2s_clk_on[idx] = true;
+	}
 
 	return qcom_snd_sdw_prepare(substream, &data->stream_prepared[cpu_dai->id]);
 }
@@ -110,6 +201,12 @@ static int sc8280xp_snd_hw_free(struct snd_pcm_substream *substream)
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
 	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	int idx = sc8280xp_mi2s_index(cpu_dai->id);
+
+	if (idx >= 0 && data->mi2s_clk_on[idx]) {
+		clk_disable_unprepare(data->mi2s_clk[idx]);
+		data->mi2s_clk_on[idx] = false;
+	}
 
 	return qcom_snd_sdw_hw_free(substream, &data->stream_prepared[cpu_dai->id]);
 }
@@ -117,6 +214,7 @@ static int sc8280xp_snd_hw_free(struct snd_pcm_substream *substream)
 static const struct snd_soc_ops sc8280xp_be_ops = {
 	.startup = qcom_snd_sdw_startup,
 	.shutdown = qcom_snd_sdw_shutdown,
+	.hw_params = sc8280xp_snd_hw_params,
 	.hw_free = sc8280xp_snd_hw_free,
 	.prepare = sc8280xp_snd_prepare,
 };
@@ -140,7 +238,7 @@ static int sc8280xp_platform_probe(struct platform_device *pdev)
 	struct snd_soc_card *card;
 	struct sc8280xp_snd_data *data;
 	struct device *dev = &pdev->dev;
-	int ret;
+	int i, ret;
 
 	card = devm_kzalloc(dev, sizeof(*card), GFP_KERNEL);
 	if (!card)
@@ -150,6 +248,14 @@ static int sc8280xp_platform_probe(struct platform_device *pdev)
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
+
+	for (i = 0; i < ARRAY_SIZE(sc8280xp_mi2s_clk_names); i++) {
+		data->mi2s_clk[i] = devm_clk_get_optional(dev, sc8280xp_mi2s_clk_names[i]);
+		if (IS_ERR(data->mi2s_clk[i]))
+			return dev_err_probe(dev, PTR_ERR(data->mi2s_clk[i]),
+					     "failed to get %s clock\n",
+					     sc8280xp_mi2s_clk_names[i]);
+	}
 
 	card->dev = dev;
 	dev_set_drvdata(dev, card);
