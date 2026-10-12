@@ -15,6 +15,9 @@
 #include <sound/soc.h>
 #include <sound/soc-dapm.h>
 #include <sound/pcm.h>
+#include <linux/debugfs.h>
+#include <linux/dma-mapping.h>
+#include <linux/of_platform.h>
 #include "audioreach.h"
 #include "q6apm.h"
 
@@ -29,6 +32,8 @@ struct apm_graph_mgmt_cmd {
 
 static struct q6apm *g_apm;
 
+static int q6apm_send_graph_open(struct q6apm *apm, struct gpr_pkt *pkt);
+
 int q6apm_send_cmd_sync(struct q6apm *apm, const struct gpr_pkt *pkt,
 			uint32_t rsp_opcode)
 {
@@ -42,7 +47,7 @@ static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, ui
 {
 	struct audioreach_graph_info *info;
 	struct audioreach_graph *graph;
-	int id;
+	int id, ret;
 
 	mutex_lock(&apm->lock);
 	graph = idr_find(&apm->graph_idr, graph_id);
@@ -87,7 +92,16 @@ static struct audioreach_graph *q6apm_get_audioreach_graph(struct q6apm *apm, ui
 
 	kref_init(&graph->refcount);
 
-	q6apm_send_cmd_sync(apm, graph->graph, 0);
+	ret = q6apm_send_graph_open(apm, graph->graph);
+	if (ret) {
+		dev_err(apm->dev, "Failed to open graph %d: %d\n", graph_id, ret);
+		mutex_lock(&apm->lock);
+		idr_remove(&apm->graph_idr, graph_id);
+		mutex_unlock(&apm->lock);
+		kfree(graph->graph);
+		kfree(graph);
+		return ERR_PTR(ret);
+	}
 
 	return graph;
 }
@@ -121,6 +135,101 @@ static int audioreach_graph_mgmt_cmd(struct audioreach_graph *graph, uint32_t op
 	return q6apm_send_cmd_sync(apm, pkt, 0);
 }
 
+static void q6apm_graph_release_cal(struct q6apm *apm, struct audioreach_graph_info *info);
+
+/* in-band GPR packets are limited to about 4 KiB */
+#define Q6APM_INBAND_MAX	3584
+
+/*
+ * Send an APM command whose payload is too large for an in-band packet
+ * through a temporary shared buffer, as the vendor graph services do.
+ */
+static int q6apm_send_cmd_oob(struct q6apm *apm, uint32_t opcode,
+			      const void *payload, size_t size)
+{
+	struct apm_shared_map_region_payload *mregions;
+	struct apm_cmd_shared_mem_unmap_regions *ucmd;
+	struct apm_cmd_shared_mem_map_regions *cmd;
+	size_t buf_size = ALIGN(size, SZ_4K);
+	struct apm_cmd_header *hdr;
+	dma_addr_t phys;
+	void *buf;
+	u64 addr;
+	int ret;
+
+	if (!apm->dais_dev)
+		return -ENODEV;
+
+	buf = dma_alloc_coherent(apm->dais_dev, buf_size, &phys, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+	memcpy(buf, payload, size);
+	addr = phys | apm->dais_sid;
+
+	struct gpr_pkt *map __free(kfree) =
+		audioreach_alloc_apm_pkt(sizeof(*cmd) + sizeof(*mregions),
+					 APM_CMD_SHARED_MEM_MAP_REGIONS, APM_MMAP_TOKEN_OOB,
+					 GPR_APM_MODULE_IID);
+	if (IS_ERR(map)) {
+		ret = PTR_ERR(map);
+		goto free;
+	}
+	cmd = (void *)map + GPR_HDR_SIZE;
+	cmd->mem_pool_id = APM_MEMORY_MAP_SHMEM8_4K_POOL;
+	cmd->num_regions = 1;
+	cmd->property_flag = 0;
+	mregions = (void *)cmd + sizeof(*cmd);
+	mregions->shm_addr_lsw = lower_32_bits(addr);
+	mregions->shm_addr_msw = upper_32_bits(addr);
+	mregions->mem_size_bytes = buf_size;
+
+	apm->oob_handle = 0;
+	ret = q6apm_send_cmd_sync(apm, map, APM_CMD_RSP_SHARED_MEM_MAP_REGIONS);
+	if (ret)
+		goto free;
+
+	struct gpr_pkt *pkt __free(kfree) =
+		audioreach_alloc_apm_pkt(sizeof(*hdr), opcode, 0, GPR_APM_MODULE_IID);
+	if (IS_ERR(pkt)) {
+		ret = PTR_ERR(pkt);
+		goto unmap;
+	}
+	hdr = (void *)pkt + GPR_HDR_SIZE;
+	hdr->payload_address_lsw = lower_32_bits(addr);
+	hdr->payload_address_msw = upper_32_bits(addr);
+	hdr->mem_map_handle = apm->oob_handle;
+	hdr->payload_size = size;
+	ret = q6apm_send_cmd_sync(apm, pkt, 0);
+
+unmap:
+	{
+		struct gpr_pkt *unmap __free(kfree) =
+			audioreach_alloc_apm_pkt(sizeof(*ucmd), APM_CMD_SHARED_MEM_UNMAP_REGIONS,
+						 APM_MMAP_TOKEN_OOB, GPR_APM_MODULE_IID);
+		if (!IS_ERR(unmap)) {
+			ucmd = (void *)unmap + GPR_HDR_SIZE;
+			ucmd->mem_map_handle = apm->oob_handle;
+			q6apm_send_cmd_sync(apm, unmap, APM_CMD_SHARED_MEM_UNMAP_REGIONS);
+		}
+	}
+free:
+	dma_free_coherent(apm->dais_dev, buf_size, buf, phys);
+
+	return ret;
+}
+
+/* graph open, out of band when the graph is large */
+static int q6apm_send_graph_open(struct q6apm *apm, struct gpr_pkt *pkt)
+{
+	struct apm_cmd_header *hdr = (void *)pkt + GPR_HDR_SIZE;
+
+	if (hdr->payload_size <= Q6APM_INBAND_MAX)
+		return q6apm_send_cmd_sync(apm, pkt, 0);
+
+	return q6apm_send_cmd_oob(apm, APM_CMD_GRAPH_OPEN, (void *)hdr + APM_CMD_HDR_SIZE,
+				  hdr->payload_size);
+}
+
 static void q6apm_put_audioreach_graph(struct kref *ref)
 {
 	struct audioreach_graph *graph;
@@ -130,6 +239,7 @@ static void q6apm_put_audioreach_graph(struct kref *ref)
 	apm = graph->apm;
 
 	audioreach_graph_mgmt_cmd(graph, APM_CMD_GRAPH_CLOSE);
+	q6apm_graph_release_cal(apm, graph->info);
 
 	mutex_lock(&apm->lock);
 	graph = idr_remove(&apm->graph_idr, graph->id);
@@ -440,6 +550,229 @@ int q6apm_set_real_module_id(struct device *dev, struct q6apm_graph *graph,
 }
 EXPORT_SYMBOL_GPL(q6apm_set_real_module_id);
 
+/*
+ * Persistent module configuration (e.g. VCPM calibration tables) is too
+ * large for an in-band command: copy it into one shared buffer per graph
+ * and register it with the DSP, which keeps referring to it while the
+ * graph is open.
+ */
+static int q6apm_graph_register_cal(struct q6apm_graph *graph)
+{
+	struct audioreach_graph_info *info = graph->info;
+	struct apm_shared_map_region_payload *mregions;
+	struct apm_cmd_shared_mem_map_regions *cmd;
+	struct audioreach_container *container;
+	struct audioreach_module *module;
+	struct audioreach_sub_graph *sgs;
+	struct q6apm *apm = graph->apm;
+	struct apm_cmd_header *hdr;
+	size_t size = 0, off = 0;
+	int ret;
+
+	if (info->cal_buf)
+		return 0;
+
+	list_for_each_entry(sgs, &info->sg_list, node)
+		list_for_each_entry(container, &sgs->container_list, node)
+			list_for_each_entry(module, &container->modules_list, node)
+				size += module->cfg_size[AR_MODULE_CFG_PERSISTENT];
+	if (!size)
+		return 0;
+	if (!apm->dais_dev)
+		return -ENODEV;
+
+	dev_dbg(apm->dev, "graph %d: %zu B persistent configuration\n", info->id, size);
+	info->cal_size = ALIGN(size, SZ_4K);
+	info->cal_dev = apm->dais_dev;
+	info->cal_buf = dma_alloc_coherent(info->cal_dev, info->cal_size,
+					   &info->cal_phys, GFP_KERNEL);
+	if (!info->cal_buf)
+		return -ENOMEM;
+
+	list_for_each_entry(sgs, &info->sg_list, node) {
+		list_for_each_entry(container, &sgs->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				memcpy(info->cal_buf + off, module->cfg[AR_MODULE_CFG_PERSISTENT],
+				       module->cfg_size[AR_MODULE_CFG_PERSISTENT]);
+				off += module->cfg_size[AR_MODULE_CFG_PERSISTENT];
+			}
+		}
+	}
+
+	struct gpr_pkt *map __free(kfree) =
+		audioreach_alloc_apm_pkt(sizeof(*cmd) + sizeof(*mregions),
+					 APM_CMD_SHARED_MEM_MAP_REGIONS,
+					 info->id | APM_MMAP_TOKEN_MAP_TYPE_CAL,
+					 GPR_APM_MODULE_IID);
+	if (IS_ERR(map))
+		return PTR_ERR(map);
+
+	cmd = (void *)map + GPR_HDR_SIZE;
+	cmd->mem_pool_id = APM_MEMORY_MAP_SHMEM8_4K_POOL;
+	cmd->num_regions = 1;
+	cmd->property_flag = 0;
+	mregions = (void *)cmd + sizeof(*cmd);
+	mregions->shm_addr_lsw = lower_32_bits(info->cal_phys | apm->dais_sid);
+	mregions->shm_addr_msw = upper_32_bits(info->cal_phys | apm->dais_sid);
+	mregions->mem_size_bytes = info->cal_size;
+
+	ret = q6apm_send_cmd_sync(apm, map, APM_CMD_RSP_SHARED_MEM_MAP_REGIONS);
+	if (ret)
+		return ret;
+
+	struct gpr_pkt *reg __free(kfree) =
+		audioreach_alloc_apm_pkt(sizeof(*hdr), APM_CMD_REGISTER_CFG, info->id,
+					 GPR_APM_MODULE_IID);
+	if (IS_ERR(reg))
+		return PTR_ERR(reg);
+
+	/* one command per parameter, as the vendor graph services do */
+	for (off = 0; off + APM_MODULE_PARAM_DATA_SIZE <= size; ) {
+		struct apm_module_param_data *pd = info->cal_buf + off;
+		size_t len = APM_MODULE_PARAM_DATA_SIZE + ALIGN(pd->param_size, 8);
+		u64 addr = (info->cal_phys + off) | apm->dais_sid;
+
+		hdr = (void *)reg + GPR_HDR_SIZE;
+		hdr->payload_address_lsw = lower_32_bits(addr);
+		hdr->payload_address_msw = upper_32_bits(addr);
+		hdr->mem_map_handle = info->cal_mem_map_handle;
+		hdr->payload_size = len;
+
+		ret = q6apm_send_cmd_sync(apm, reg, 0);
+		if (ret) {
+			dev_err(apm->dev, "persistent config iid 0x%x pid 0x%x (%zu bytes): %d\n",
+				pd->module_instance_id, pd->param_id, len, ret);
+			return ret;
+		}
+		off += len;
+	}
+
+	return 0;
+}
+
+static void q6apm_graph_release_cal(struct q6apm *apm, struct audioreach_graph_info *info)
+{
+	struct apm_cmd_shared_mem_unmap_regions *cmd;
+
+	if (!info->cal_buf)
+		return;
+
+	if (info->cal_mem_map_handle) {
+		struct gpr_pkt *pkt __free(kfree) =
+			audioreach_alloc_apm_pkt(sizeof(*cmd), APM_CMD_SHARED_MEM_UNMAP_REGIONS,
+						 info->id | APM_MMAP_TOKEN_MAP_TYPE_CAL,
+						 GPR_APM_MODULE_IID);
+		if (!IS_ERR(pkt)) {
+			cmd = (void *)pkt + GPR_HDR_SIZE;
+			cmd->mem_map_handle = info->cal_mem_map_handle;
+			q6apm_send_cmd_sync(apm, pkt, APM_CMD_SHARED_MEM_UNMAP_REGIONS);
+		}
+	}
+	dma_free_coherent(info->cal_dev, info->cal_size, info->cal_buf, info->cal_phys);
+	info->cal_buf = NULL;
+	info->cal_mem_map_handle = 0;
+}
+
+/*
+ * A graph without a shared memory endpoint exchanges no data with the
+ * host, e.g. a voice call between the modem and the codecs. Its modules
+ * get only the configuration from the topology: the media formats are
+ * negotiated inside the DSP (VCPM for voice).
+ */
+bool q6apm_graph_is_hostless(struct q6apm_graph *graph)
+{
+	return !graph->shm_iid;
+}
+EXPORT_SYMBOL_GPL(q6apm_graph_is_hostless);
+
+/*
+ * Links from a hostless graph to the playback device graph, one graph open
+ * command per parameter; a link the device modules do not support is
+ * reported and skipped.
+ */
+static int q6apm_graph_open_playback_links(struct q6apm_graph *graph)
+{
+	struct audioreach_graph_info *info = graph->info;
+	struct audioreach_container *container;
+	struct audioreach_module *module;
+	struct audioreach_sub_graph *sgs;
+	size_t size, off, len;
+	int ret;
+
+	list_for_each_entry(sgs, &info->sg_list, node) {
+		list_for_each_entry(container, &sgs->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				size = module->cfg_size[AR_MODULE_CFG_PLAYBACK_LINKS];
+				for (off = 0; off + APM_MODULE_PARAM_DATA_SIZE <= size; off += len) {
+					const struct apm_module_param_data *pd =
+						module->cfg[AR_MODULE_CFG_PLAYBACK_LINKS] + off;
+
+					len = APM_MODULE_PARAM_DATA_SIZE + ALIGN(pd->param_size, 8);
+					if (len > size - off)
+						return -EINVAL;
+
+					struct gpr_pkt *pkt __free(kfree) =
+						audioreach_alloc_apm_cmd_pkt(len, APM_CMD_GRAPH_OPEN, 0);
+					if (IS_ERR(pkt))
+						return PTR_ERR(pkt);
+					memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, pd, len);
+					ret = q6apm_send_cmd_sync(graph->apm, pkt, 0);
+					if (ret == -EINVAL)
+						dev_warn(graph->dev, "playback link %zu of 0x%x rejected\n",
+							 off, module->instance_id);
+					else if (ret)
+						return ret;
+				}
+			}
+		}
+	}
+
+	return 0;
+}
+
+int q6apm_graph_hostless_config(struct q6apm_graph *graph, int dir)
+{
+	struct audioreach_graph_info *info = graph->info;
+	struct audioreach_container *container;
+	struct audioreach_module *module;
+	struct audioreach_sub_graph *sgs;
+	int ret;
+
+	list_for_each_entry(sgs, &info->sg_list, node) {
+		list_for_each_entry(container, &sgs->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				ret = audioreach_set_module_config(graph, module, NULL);
+				if (ret)
+					return ret;
+			}
+		}
+	}
+
+	if (dir == SNDRV_PCM_STREAM_PLAYBACK) {
+		ret = q6apm_graph_open_playback_links(graph);
+		if (ret)
+			return ret;
+	}
+
+	/* e.g. VCPM: the session (VSID) first, then its calibration tables */
+	ret = q6apm_graph_register_cal(graph);
+	if (ret)
+		return ret;
+
+	list_for_each_entry(sgs, &info->sg_list, node) {
+		list_for_each_entry(container, &sgs->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				ret = audioreach_set_module_config_late(graph, module);
+				if (ret)
+					return ret;
+			}
+		}
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(q6apm_graph_hostless_config);
+
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph, struct audioreach_module_config *cfg)
 {
 	struct audioreach_graph_info *info = graph->info;
@@ -447,6 +780,10 @@ int q6apm_graph_media_format_pcm(struct q6apm_graph *graph, struct audioreach_mo
 	struct audioreach_container *container;
 	struct audioreach_module *module;
 	int ret;
+
+	ret = q6apm_graph_register_cal(graph);
+	if (ret)
+		return ret;
 
 	list_for_each_entry(sgs, &info->sg_list, node) {
 		list_for_each_entry(container, &sgs->container_list, node) {
@@ -856,9 +1193,195 @@ static const struct snd_soc_component_driver q6apm_audio_component = {
 	.remove_order   = SND_SOC_COMP_ORDER_LAST,
 };
 
+/*
+ * Bring-up only: send raw APM commands from userspace, to experiment with
+ * graphs the topology cannot describe yet (voice calls). Not for production.
+ *
+ * write: u32 opcode, then the command payload after the GPR header (the
+ *        apm_cmd_header followed by the parameters). Pseudo opcodes:
+ *        Q6APM_RAW_MAP <u32 size>: allocate and map one shared buffer
+ *        Q6APM_RAW_FILL <u32 offset> <data>: copy data into that buffer
+ * read:  "status <s> handle <h> iova <a> size <n>", followed by the payload
+ *        of the last APM_CMD_RSP_GET_CFG as hex words, if any.
+ */
+#define Q6APM_RAW_TOKEN		0x52415700
+#define Q6APM_RAW_MAP		0xffff0001
+#define Q6APM_RAW_FILL		0xffff0002
+
+static int q6apm_raw_map(struct q6apm *apm, uint32_t size)
+{
+	struct apm_shared_map_region_payload *mregions;
+	struct apm_cmd_shared_mem_map_regions *cmd;
+	struct device *dev = apm->dais_dev;
+	struct gpr_pkt *pkt;
+	int ret;
+
+	if (!dev || apm->raw_buf || !size || size > SZ_1M)
+		return -EINVAL;
+
+	size = ALIGN(size, SZ_4K);
+	apm->raw_buf = dma_alloc_coherent(dev, size, &apm->raw_iova, GFP_KERNEL);
+	if (!apm->raw_buf)
+		return -ENOMEM;
+	apm->raw_size = size;
+
+	pkt = audioreach_alloc_apm_pkt(sizeof(*cmd) + sizeof(*mregions),
+				       APM_CMD_SHARED_MEM_MAP_REGIONS, Q6APM_RAW_TOKEN,
+				       GPR_APM_MODULE_IID);
+	if (IS_ERR(pkt))
+		return PTR_ERR(pkt);
+
+	cmd = (void *)pkt + GPR_HDR_SIZE;
+	cmd->mem_pool_id = APM_MEMORY_MAP_SHMEM8_4K_POOL;
+	cmd->num_regions = 1;
+	cmd->property_flag = 0;
+	mregions = (void *)cmd + sizeof(*cmd);
+	mregions->shm_addr_lsw = lower_32_bits(apm->raw_iova | apm->dais_sid);
+	mregions->shm_addr_msw = upper_32_bits(apm->raw_iova | apm->dais_sid);
+	mregions->mem_size_bytes = size;
+
+	ret = q6apm_send_cmd_sync(apm, pkt, APM_CMD_RSP_SHARED_MEM_MAP_REGIONS);
+	kfree(pkt);
+
+	return ret;
+}
+
+static ssize_t q6apm_raw_write(struct file *file, const char __user *ubuf,
+			       size_t len, loff_t *ppos)
+{
+	struct q6apm *apm = file->private_data;
+	struct gpr_pkt *pkt;
+	uint32_t *buf;
+	int ret;
+
+	if (len < 4 || len > SZ_64K)
+		return -EINVAL;
+
+	buf = memdup_user(ubuf, len);
+	if (IS_ERR(buf))
+		return PTR_ERR(buf);
+
+	switch (buf[0]) {
+	case Q6APM_RAW_MAP:
+		ret = len >= 8 ? q6apm_raw_map(apm, buf[1]) : -EINVAL;
+		break;
+	case Q6APM_RAW_FILL:
+		if (len < 8 || !apm->raw_buf || buf[1] > apm->raw_size ||
+		    len - 8 > apm->raw_size - buf[1]) {
+			ret = -EINVAL;
+			break;
+		}
+		memcpy(apm->raw_buf + buf[1], &buf[2], len - 8);
+		ret = 0;
+		break;
+	default:
+		pkt = audioreach_alloc_apm_pkt(len - 4, buf[0], Q6APM_RAW_TOKEN,
+					       GPR_APM_MODULE_IID);
+		if (IS_ERR(pkt)) {
+			ret = PTR_ERR(pkt);
+			break;
+		}
+		memcpy((void *)pkt + GPR_HDR_SIZE, &buf[1], len - 4);
+		ret = q6apm_send_cmd_sync(apm, pkt,
+					  buf[0] == APM_CMD_GET_CFG ? APM_CMD_RSP_GET_CFG : 0);
+		kfree(pkt);
+	}
+	kfree(buf);
+	apm->raw_status = ret ? ret : apm->result.status;
+
+	return ret ? ret : len;
+}
+
+static ssize_t q6apm_raw_read(struct file *file, char __user *ubuf,
+			      size_t len, loff_t *ppos)
+{
+	struct q6apm *apm = file->private_data;
+	size_t n = 0, sz = 128 + apm->raw_rsp_len * 3;
+	ssize_t ret;
+	char *s;
+	int i;
+
+	s = kzalloc(sz, GFP_KERNEL);
+	if (!s)
+		return -ENOMEM;
+	n += scnprintf(s + n, sz - n, "status %d handle 0x%x iova 0x%llx size %zu\n",
+		       apm->raw_status, apm->raw_handle, (u64)apm->raw_iova | apm->dais_sid,
+		       apm->raw_size);
+	for (i = 0; i + 4 <= apm->raw_rsp_len; i += 4)
+		n += scnprintf(s + n, sz - n, "%08x%c", *(u32 *)(apm->raw_rsp + i),
+			       (i / 4) % 8 == 7 ? '\n' : ' ');
+	ret = simple_read_from_buffer(ubuf, len, ppos, s, n);
+	kfree(s);
+
+	return ret;
+}
+
+static const struct file_operations q6apm_raw_fops = {
+	.open = simple_open,
+	.write = q6apm_raw_write,
+	.read = q6apm_raw_read,
+	.llseek = default_llseek,
+};
+
+/* responses to raw commands, from apm_callback() */
+static bool q6apm_raw_callback(struct q6apm *apm, const struct gpr_resp_pkt *data)
+{
+	const struct gpr_hdr *hdr = &data->hdr;
+	struct gpr_ibasic_rsp_result_t *result = data->payload;
+
+	if (hdr->token != Q6APM_RAW_TOKEN)
+		return false;
+
+	switch (hdr->opcode) {
+	case GPR_BASIC_RSP_RESULT:
+		apm->result.opcode = result->opcode;
+		apm->result.status = result->status;
+		if (result->status)
+			dev_err(apm->dev, "raw: error %d for 0x%08x\n", result->status,
+				result->opcode);
+		break;
+	case APM_CMD_RSP_SHARED_MEM_MAP_REGIONS:
+		apm->raw_handle = ((struct apm_cmd_rsp_shared_mem_map_regions *)
+				   data->payload)->mem_map_handle;
+		apm->result.opcode = hdr->opcode;
+		apm->result.status = 0;
+		break;
+	case APM_CMD_RSP_GET_CFG:
+		kfree(apm->raw_rsp);
+		apm->raw_rsp = kmemdup(data->payload, data->payload_size, GFP_ATOMIC);
+		apm->raw_rsp_len = apm->raw_rsp ? data->payload_size : 0;
+		apm->result.opcode = hdr->opcode;
+		apm->result.status = *(u32 *)data->payload;
+		break;
+	default:
+		return true;
+	}
+	wake_up(&apm->wait);
+
+	return true;
+}
+
+static void q6apm_raw_init(struct q6apm *apm)
+{
+	apm->raw_dentry = debugfs_create_file("q6apm_raw", 0600, NULL, apm,
+					      &q6apm_raw_fops);
+}
+
+static void q6apm_raw_exit(struct q6apm *apm)
+{
+	debugfs_remove(apm->raw_dentry);
+	if (apm->raw_buf)
+		dma_free_coherent(apm->dais_dev, apm->raw_size, apm->raw_buf,
+				  apm->raw_iova);
+	kfree(apm->raw_rsp);
+}
+
 static int apm_probe(gpr_device_t *gdev)
 {
 	struct device *dev = &gdev->dev;
+	struct of_phandle_args args;
+	struct platform_device *pdev;
+	struct device_node *np;
 	struct q6apm *apm;
 	int ret;
 
@@ -892,14 +1415,31 @@ static int apm_probe(gpr_device_t *gdev)
 	}
 
 	ret = of_platform_populate(dev->of_node, NULL, NULL, dev);
-	if (ret)
+	if (ret) {
 		snd_soc_unregister_component(dev);
+		return ret;
+	}
 
-	return ret;
+	np = of_get_child_by_name(dev->of_node, "dais");
+	pdev = np ? of_find_device_by_node(np) : NULL;
+	if (np && !of_parse_phandle_with_fixed_args(np, "iommus", 1, 0, &args))
+		apm->dais_sid = (u64)(args.args[0] & 0xf) << 32;
+	of_node_put(np);
+	if (pdev)
+		apm->dais_dev = &pdev->dev;
+
+	q6apm_raw_init(apm);
+
+	return 0;
 }
 
 static void apm_remove(gpr_device_t *gdev)
 {
+	struct q6apm *apm = dev_get_drvdata(&gdev->dev);
+
+	q6apm_raw_exit(apm);
+	if (apm->dais_dev)
+		put_device(apm->dais_dev);
 	of_platform_depopulate(&gdev->dev);
 	snd_soc_unregister_component(&gdev->dev);
 }
@@ -926,6 +1466,9 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 
 	result = data->payload;
 
+	if (q6apm_raw_callback(apm, data))
+		return 0;
+
 	switch (hdr->opcode) {
 	case APM_CMD_RSP_GET_SPF_STATE:
 		apm->result.opcode = hdr->opcode;
@@ -944,6 +1487,7 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		case APM_CMD_GRAPH_FLUSH:
 		case APM_CMD_GRAPH_STOP:
 		case APM_CMD_SET_CFG:
+		case APM_CMD_REGISTER_CFG:
 			apm->result.opcode = result->opcode;
 			apm->result.status = result->status;
 			if (result->status)
@@ -955,6 +1499,22 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 			apm->result.opcode = hdr->opcode;
 			apm->result.status = 0;
 			rsp = data->payload;
+
+			if (hdr->token == APM_MMAP_TOKEN_OOB) {
+				apm->oob_handle = 0;
+				apm->result.opcode = result->opcode;
+				wake_up(&apm->wait);
+				break;
+			}
+			if (hdr->token & APM_MMAP_TOKEN_MAP_TYPE_CAL) {
+				info = idr_find(&apm->graph_info_idr,
+						hdr->token & APM_MMAP_TOKEN_GID_MASK);
+				if (info)
+					info->cal_mem_map_handle = 0;
+				apm->result.opcode = result->opcode;
+				wake_up(&apm->wait);
+				break;
+			}
 
 			info = idr_find(&apm->graph_info_idr, hdr->token);
 			if (info)
@@ -973,11 +1533,19 @@ static int apm_callback(const struct gpr_resp_pkt *data, void *priv, int op)
 		apm->result.opcode = hdr->opcode;
 		apm->result.status = 0;
 		rsp = data->payload;
+
+		if (hdr->token == APM_MMAP_TOKEN_OOB) {
+			apm->oob_handle = rsp->mem_map_handle;
+			wake_up(&apm->wait);
+			break;
+		}
 		graph_id = hdr->token & APM_MMAP_TOKEN_GID_MASK;
 		is_pos_buf = hdr->token & APM_MMAP_TOKEN_MAP_TYPE_POS_BUF;
 
 		info = idr_find(&apm->graph_info_idr, graph_id);
-		if (info) {
+		if (info && (hdr->token & APM_MMAP_TOKEN_MAP_TYPE_CAL)) {
+			info->cal_mem_map_handle = rsp->mem_map_handle;
+		} else if (info) {
 			if (is_pos_buf)
 				info->pos_buf_mem_map_handle = rsp->mem_map_handle;
 			else

@@ -68,6 +68,23 @@ struct q6apm {
 	struct idr sub_graphs_idr;
 	struct idr containers_idr;
 	struct idr modules_idr;
+
+	/* device with the DSP's IOMMU mapping, for shared memory */
+	struct device *dais_dev;
+	/* its SMMU stream ID, which the DSP expects in address bits 32+ */
+	u64 dais_sid;
+	/* handle of the temporary mapping for an out-of-band command */
+	uint32_t oob_handle;
+
+	/* bring-up: raw APM command interface in debugfs */
+	struct dentry *raw_dentry;
+	void *raw_buf;
+	dma_addr_t raw_iova;
+	size_t raw_size;
+	uint32_t raw_handle;
+	int raw_status;
+	void *raw_rsp;
+	size_t raw_rsp_len;
 };
 
 struct audio_buffer {
@@ -122,6 +139,8 @@ int q6apm_graph_stop(struct q6apm_graph *graph);
 int q6apm_graph_flush(struct q6apm_graph *graph);
 
 /* Media Format */
+bool q6apm_graph_is_hostless(struct q6apm_graph *graph);
+int q6apm_graph_hostless_config(struct q6apm_graph *graph, int dir);
 int q6apm_graph_media_format_pcm(struct q6apm_graph *graph,
 				 struct audioreach_module_config *cfg);
 

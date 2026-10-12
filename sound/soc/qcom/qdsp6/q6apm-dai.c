@@ -244,6 +244,21 @@ static int q6apm_dai_prepare(struct snd_soc_component *component,
 
 	prtd->last_pos_index = 0;
 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
+
+	if (q6apm_graph_is_hostless(prtd->graph)) {
+		ret = q6apm_graph_hostless_config(prtd->graph, substream->stream);
+		if (!ret)
+			ret = q6apm_graph_prepare(prtd->graph);
+		if (!ret)
+			ret = q6apm_graph_start(prtd->graph);
+		if (ret) {
+			dev_err(dev, "Failed to start hostless graph %d\n", ret);
+			return ret;
+		}
+		prtd->state = Q6APM_STREAM_RUNNING;
+		return 0;
+	}
+
 	if (q6apm_is_graph_in_push_pull_mode(prtd->graph)) {
 		if (prtd->pcm_size != prtd->push_pull_size) {
 			ret = q6apm_push_pull_config(prtd->graph, prtd->phys, prtd->pos_phys,

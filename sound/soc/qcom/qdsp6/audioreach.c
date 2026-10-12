@@ -21,10 +21,11 @@ struct apm_sub_graph_data {
 	struct apm_sg_prop_id_direction dir;
 	struct apm_prop_data sid_data;
 	struct apm_sg_prop_id_scenario_id sid;
-
+	struct apm_prop_data vsid_data;
+	struct apm_sg_prop_id_vsid vsid;
 } __packed;
 
-#define APM_SUB_GRAPH_CFG_NPROP	3
+#define APM_SUB_GRAPH_CFG_NPROP	4
 
 struct apm_sub_graph_params  {
 	struct apm_module_param_data param_data;
@@ -358,6 +359,11 @@ static void apm_populate_sub_graph_config(struct apm_sub_graph_data *cfg,
 	cfg->sid_data.prop_id = APM_SUB_GRAPH_PROP_ID_SCENARIO_ID;
 	cfg->sid_data.prop_size = APM_SG_PROP_ID_SID_SIZE;
 	cfg->sid.scenario_id = sg->scenario_id;
+
+	/* Voice session */
+	cfg->vsid_data.prop_id = APM_SUB_GRAPH_PROP_ID_VSID;
+	cfg->vsid_data.prop_size = APM_SG_PROP_ID_VSID_SIZE;
+	cfg->vsid.vsid = APM_SUB_GRAPH_VSID_DONT_CARE;
 }
 
 static void apm_populate_module_prop_obj(struct apm_mod_prop_obj *obj,
@@ -485,6 +491,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	int num_sub_graphs = 0;
 	int num_modules = 0;
 	int num_modules_list;
+	size_t open_sz = 0;
 	struct gpr_pkt *pkt;
 	void *p;
 
@@ -505,6 +512,7 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 
 			list_for_each_entry(module, &container->modules_list, node) {
 				num_connections += module->num_connections;
+				open_sz += module->cfg_size[AR_MODULE_CFG_GRAPH_OPEN];
 			}
 		}
 	}
@@ -518,7 +526,9 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	mp_sz = APM_MOD_PROP_PSIZE(mprop, num_modules);
 	mc_sz =	APM_MOD_CONN_PSIZE(mcon, num_connections);
 
-	payload_size = sg_sz + cont_sz + ml_sz + mp_sz + mc_sz;
+	payload_size = sg_sz + cont_sz + ml_sz + mp_sz + mc_sz + open_sz;
+	dev_dbg(apm->dev, "graph %d open: %d sub-graphs, %d modules, %d connections, %zu B extra\n",
+		info->id, num_sub_graphs, num_modules, num_connections, open_sz);
 	pkt = audioreach_alloc_apm_cmd_pkt(payload_size, APM_CMD_GRAPH_OPEN, 0);
 	if (IS_ERR(pkt))
 		return pkt;
@@ -571,6 +581,18 @@ void *audioreach_alloc_graph_pkt(struct q6apm *apm,
 	p += mc_sz;
 
 	audioreach_populate_graph(apm, info, &params, sg_list, num_sub_graphs);
+
+	/* extra graph open parameters from the topology, e.g. control links */
+	list_for_each_entry(sgs, sg_list, node) {
+		list_for_each_entry(container, &sgs->container_list, node) {
+			list_for_each_entry(module, &container->modules_list, node) {
+				size_t sz = module->cfg_size[AR_MODULE_CFG_GRAPH_OPEN];
+
+				memcpy(p, module->cfg[AR_MODULE_CFG_GRAPH_OPEN], sz);
+				p += sz;
+			}
+		}
+	}
 
 	return pkt;
 }
@@ -813,23 +835,54 @@ static int audioreach_gapless_set_media_format(struct q6apm_graph *graph,
 					 EARLY_EOS_DELAY_MS);
 }
 
-static int audioreach_set_module_config(struct q6apm_graph *graph,
-					const struct audioreach_module *module,
-					const struct audioreach_module_config *cfg)
+static int __audioreach_set_module_config(struct q6apm_graph *graph,
+					  const struct audioreach_module *module, int kind)
 {
-	int size = le32_to_cpu(module->data->size);
-	void *p;
+	size_t size = module->cfg_size[kind], off, len;
+	int ret;
 
-	struct gpr_pkt *pkt __free(kfree) = audioreach_alloc_apm_cmd_pkt(size, APM_CMD_SET_CFG, 0);
-	if (IS_ERR(pkt))
-		return PTR_ERR(pkt);
+	/*
+	 * One command per parameter: a parameter the DSP rejects is reported
+	 * and skipped, like a vendor calibration set that is applied as a whole.
+	 */
+	for (off = 0; off + APM_MODULE_PARAM_DATA_SIZE <= size; off += len) {
+		const struct apm_module_param_data *pd = module->cfg[kind] + off;
 
-	p = (void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE;
+		len = APM_MODULE_PARAM_DATA_SIZE + ALIGN(pd->param_size, 8);
+		if (len > size - off)
+			return -EINVAL;
 
-	memcpy(p, module->data->data, size);
+		struct gpr_pkt *pkt __free(kfree) =
+			audioreach_alloc_apm_cmd_pkt(len, APM_CMD_SET_CFG, 0);
+		if (IS_ERR(pkt))
+			return PTR_ERR(pkt);
 
-	return q6apm_send_cmd_sync(graph->apm, pkt, 0);
+		memcpy((void *)pkt + GPR_HDR_SIZE + APM_CMD_HDR_SIZE, pd, len);
+		ret = q6apm_send_cmd_sync(graph->apm, pkt, 0);
+		if (ret == -EINVAL)
+			dev_warn(graph->dev, "set config iid 0x%x pid 0x%x rejected\n",
+				 pd->module_instance_id, pd->param_id);
+		else if (ret)
+			return ret;
+	}
+
+	return 0;
 }
+
+int audioreach_set_module_config(struct q6apm_graph *graph,
+				 const struct audioreach_module *module,
+				 const struct audioreach_module_config *cfg)
+{
+	return __audioreach_set_module_config(graph, module, AR_MODULE_CFG_SET);
+}
+EXPORT_SYMBOL_GPL(audioreach_set_module_config);
+
+int audioreach_set_module_config_late(struct q6apm_graph *graph,
+				      const struct audioreach_module *module)
+{
+	return __audioreach_set_module_config(graph, module, AR_MODULE_CFG_SET_LATE);
+}
+EXPORT_SYMBOL_GPL(audioreach_set_module_config_late);
 
 static int audioreach_mfc_set_media_format(struct q6apm_graph *graph,
 					   const struct audioreach_module *module,
@@ -1370,9 +1423,6 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 	case MODULE_ID_DISPLAY_PORT_SINK:
 		rc = audioreach_display_port_set_media_format(graph, module, cfg);
 		break;
-	case  MODULE_ID_SMECNS_V2:
-		rc = audioreach_set_module_config(graph, module, cfg);
-		break;
 	case MODULE_ID_I2S_SOURCE:
 	case MODULE_ID_I2S_SINK:
 		rc = audioreach_i2s_set_media_format(graph, module, cfg);
@@ -1415,6 +1465,10 @@ int audioreach_set_media_format(struct q6apm_graph *graph,
 	default:
 		rc = 0;
 	}
+
+	/* topology supplied configuration last, so it can override defaults */
+	if (!rc)
+		rc = audioreach_set_module_config(graph, module, cfg);
 
 	return rc;
 }

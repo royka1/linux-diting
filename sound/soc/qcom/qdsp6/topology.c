@@ -305,32 +305,43 @@ audioreach_get_module_array(const struct snd_soc_tplg_private *private)
 	return NULL;
 }
 
-static struct audioreach_module_priv_data *
-audioreach_get_module_priv_data(const struct snd_soc_tplg_private *private)
+/*
+ * Collect the configuration arrays of a module widget. Each array is an
+ * audioreach_module_priv_data header (size in bytes, including the header)
+ * followed by APM module parameters; priv[0] selects AR_MODULE_CFG_*.
+ */
+static int audioreach_load_module_cfg(struct audioreach_module *mod,
+				      const struct snd_soc_tplg_private *private)
 {
-	int sz;
+	u32 total = le32_to_cpu(private->size);
+	u32 sz, size, kind;
 
-	for (sz = 0; sz < le32_to_cpu(private->size); ) {
-		const struct snd_soc_tplg_vendor_array *mod_array;
+	for (sz = 0; sz + sizeof(struct audioreach_module_priv_data) <= total; sz += size) {
+		const struct audioreach_module_priv_data *pdata;
+		void *cfg;
 
-		mod_array = (struct snd_soc_tplg_vendor_array *)((u8 *)private->array + sz);
-		if (le32_to_cpu(mod_array->type) == SND_SOC_AR_TPLG_MODULE_CFG_TYPE) {
-			struct audioreach_module_priv_data *pdata;
+		pdata = (const void *)((const u8 *)private->data + sz);
+		size = le32_to_cpu(pdata->size);
+		if (size < sizeof(*pdata) || size > total - sz)
+			return -EINVAL;
+		if (le32_to_cpu(pdata->type) != SND_SOC_AR_TPLG_MODULE_CFG_TYPE)
+			continue;
 
-			pdata = kzalloc_flex(*pdata, data,
-					     le32_to_cpu(mod_array->size));
-			if (!pdata)
-				return ERR_PTR(-ENOMEM);
+		kind = le32_to_cpu(pdata->priv[0]);
+		if (kind >= ARRAY_SIZE(mod->cfg))
+			return -EINVAL;
 
-			memcpy(pdata, ((u8 *)private->data + sz), struct_size(pdata, data,
-						le32_to_cpu(mod_array->size)));
-			return pdata;
-		}
-
-		sz = sz + le32_to_cpu(mod_array->size);
+		size -= sizeof(*pdata);
+		cfg = krealloc(mod->cfg[kind], mod->cfg_size[kind] + size, GFP_KERNEL);
+		if (!cfg)
+			return -ENOMEM;
+		memcpy(cfg + mod->cfg_size[kind], pdata->data, size);
+		mod->cfg[kind] = cfg;
+		mod->cfg_size[kind] += size;
+		size += sizeof(*pdata);
 	}
 
-	return NULL;
+	return 0;
 }
 
 static struct audioreach_sub_graph *audioreach_parse_sg_tokens(struct q6apm *apm,
@@ -597,6 +608,7 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 	struct audioreach_sub_graph *sg;
 	struct audioreach_module *mod;
 	struct snd_soc_dobj *dobj;
+	int ret;
 
 	sg = audioreach_parse_sg_tokens(apm, &tplg_w->priv);
 	if (IS_ERR(sg))
@@ -610,7 +622,9 @@ static int audioreach_widget_load_module_common(struct snd_soc_component *compon
 	if (IS_ERR_OR_NULL(mod))
 		return mod ? PTR_ERR(mod) : -ENODEV;
 
-	mod->data = audioreach_get_module_priv_data(&tplg_w->priv);
+	ret = audioreach_load_module_cfg(mod, &tplg_w->priv);
+	if (ret)
+		return ret;
 
 	dobj = &w->dobj;
 	dobj->private = mod;
@@ -951,6 +965,7 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	struct q6apm *apm = dev_get_drvdata(scomp->dev);
 	struct audioreach_container *cont;
 	struct audioreach_module *mod;
+	int i;
 
 	if (w->id == snd_soc_dapm_mixer) {
 		/* virtual widget */
@@ -971,7 +986,8 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	cont->num_modules--;
 
 	list_del(&mod->node);
-	kfree(mod->data);
+	for (i = 0; i < ARRAY_SIZE(mod->cfg); i++)
+		kfree(mod->cfg[i]);
 	kfree(mod);
 	/* Graph Info has N sub-graphs, sub-graph has N containers, Container has N Modules */
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */

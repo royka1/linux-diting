@@ -8,6 +8,7 @@
 #include <sound/soc.h>
 struct q6apm;
 struct q6apm_graph;
+struct audioreach_module_config;
 
 /* Module IDs */
 #define MODULE_ID_WR_SHARED_MEM_EP	0x07001000
@@ -59,6 +60,7 @@ struct q6apm_graph;
 #define APM_CMD_GRAPH_CLOSE			0x01001004
 #define APM_CMD_GRAPH_FLUSH			0x01001005
 #define APM_CMD_SET_CFG				0x01001006
+#define APM_CMD_REGISTER_CFG			0x01001008
 #define APM_CMD_GET_CFG				0x01001007
 #define APM_CMD_SHARED_MEM_MAP_REGIONS		0x0100100C
 #define APM_CMD_SHARED_MEM_UNMAP_REGIONS	0x0100100D
@@ -68,6 +70,8 @@ struct q6apm_graph;
 #define APM_MMAP_TOKEN_GID_MASK			GENMASK(15, 0)
 #define APM_MMAP_TOKEN_MAP_TYPE_POS_BUF		BIT(16)
 #define APM_MMAP_TOKEN_MAP_TYPE_SHIFT		16
+#define APM_MMAP_TOKEN_MAP_TYPE_CAL		BIT(17)
+#define APM_MMAP_TOKEN_OOB			0x4f4f4200
 #define APM_CMD_RSP_GET_CFG			0x02001000
 #define APM_CMD_CLOSE_ALL			0x01001013
 #define APM_CMD_REGISTER_SHARED_CFG		0x0100100A
@@ -474,6 +478,20 @@ struct apm_sg_prop_id_scenario_id {
 } __packed;
 
 #define APM_SG_PROP_ID_SID_SIZE			4
+
+/*
+ * Voice session of a sub-graph. VCPM finds the sub-graphs of a voice call
+ * through it; "don't care" sub-graphs join the session that the client
+ * names with VCPM_PARAM_ID_VSID. The DSP default without the property is 0.
+ */
+#define APM_SUB_GRAPH_PROP_ID_VSID		0x080010CC
+#define APM_SUB_GRAPH_VSID_DONT_CARE		0xFFFFFFFF
+
+struct apm_sg_prop_id_vsid {
+	uint32_t vsid;
+} __packed;
+
+#define APM_SG_PROP_ID_VSID_SIZE		4
 /* container api */
 #define APM_PARAM_ID_CONTAINER_CONFIG		0x08001000
 
@@ -813,6 +831,12 @@ struct audioreach_graph_info {
 	int id;
 	uint32_t mem_map_handle;
 	uint32_t pos_buf_mem_map_handle;
+	/* persistent module configuration (calibration) in shared memory */
+	uint32_t cal_mem_map_handle;
+	void *cal_buf;
+	dma_addr_t cal_phys;
+	size_t cal_size;
+	struct device *cal_dev;
 	uint32_t num_sub_graphs;
 	struct list_head sg_list;
 	bool is_push_pull_mode;
@@ -892,8 +916,34 @@ struct audioreach_module {
 	struct list_head node;
 	struct audioreach_container *container;
 	struct snd_soc_dapm_widget *widget;
-	struct audioreach_module_priv_data *data;
+
+	/*
+	 * Configuration from the topology (SND_SOC_AR_TPLG_MODULE_CFG_TYPE
+	 * arrays), each a list of APM module parameters, by AR_MODULE_CFG_*:
+	 * sent with APM_CMD_SET_CFG when the media format is set, registered
+	 * as persistent configuration through shared memory, or added to the
+	 * graph open command (e.g. control links).
+	 */
+	void *cfg[5];
+	size_t cfg_size[5];
 };
+
+int audioreach_set_module_config(struct q6apm_graph *graph,
+				 const struct audioreach_module *module,
+				 const struct audioreach_module_config *cfg);
+int audioreach_set_module_config_late(struct q6apm_graph *graph,
+				      const struct audioreach_module *module);
+
+/*
+ * order of use: GRAPH_OPEN, SET, PERSISTENT, SET_LATE; PLAYBACK_LINKS is a
+ * graph open command with links to the playback device graph, sent when a
+ * hostless graph is prepared for playback (that device graph exists then)
+ */
+#define AR_MODULE_CFG_SET		0
+#define AR_MODULE_CFG_PERSISTENT	1
+#define AR_MODULE_CFG_GRAPH_OPEN	2
+#define AR_MODULE_CFG_SET_LATE		3
+#define AR_MODULE_CFG_PLAYBACK_LINKS	4
 
 struct audioreach_module_config {
 	int	direction;
