@@ -745,7 +745,7 @@
 	pinctrl-names = "default";
 
 	/* bit clock, enabled before the amplifiers lock their PLL to it */
-	clocks = <&q6prmcc LPASS_CLK_ID_TER_MI2S_IBIT LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+	clocks = <&q6prmcc LPASS_CLK_ID_TER_TDM_IBIT LPASS_CLK_ATTRIBUTE_INVERT_COUPLE_NO>;
 	clock-names = "tertiary-mi2s";
 
 	audio-routing = "AMIC1", "MIC BIAS1",
@@ -757,7 +757,7 @@
 		link-name = "Speaker Playback";
 
 		cpu {
-			sound-dai = <&q6apmbedai TERTIARY_MI2S_RX>;
+			sound-dai = <&q6apmbedai TERTIARY_TDM_RX_0>;
 		};
 
 		codec {
