@@ -7,6 +7,7 @@
 #include <linux/auxiliary_bus.h>
 #include <linux/devm-helpers.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/mutex.h>
 #include <linux/nvmem-consumer.h>
 #include <linux/of_device.h>
@@ -313,6 +314,11 @@ struct qcom_battmgr {
 	struct pmic_glink_client *client;
 
 	enum qcom_battmgr_variant variant;
+	/*
+	 * Some firmware still has BATT_CONSTANT_CURRENT at index 12, which
+	 * moves every later battery property up by one.
+	 */
+	bool bat_prop_constant_current;
 
 	struct power_supply *ac_psy;
 	struct power_supply *bat_psy;
@@ -361,9 +367,30 @@ static int qcom_battmgr_request(struct qcom_battmgr *battmgr, void *data, size_t
 	return battmgr->error;
 }
 
+#define BATT_FW_CONSTANT_CURRENT	12
+
+static int qcom_battmgr_bat_prop_to_fw(struct qcom_battmgr *battmgr, int property)
+{
+	if (battmgr->bat_prop_constant_current &&
+	    property >= BATT_FW_CONSTANT_CURRENT)
+		return property + 1;
+	return property;
+}
+
+static int qcom_battmgr_bat_prop_from_fw(struct qcom_battmgr *battmgr, int property)
+{
+	if (battmgr->bat_prop_constant_current &&
+	    property > BATT_FW_CONSTANT_CURRENT)
+		return property - 1;
+	return property;
+}
+
 static int qcom_battmgr_request_property(struct qcom_battmgr *battmgr, int opcode,
 					 int property, u32 value)
 {
+	if (opcode == BATTMGR_BAT_PROPERTY_GET || opcode == BATTMGR_BAT_PROPERTY_SET)
+		property = qcom_battmgr_bat_prop_to_fw(battmgr, property);
+
 	struct qcom_battmgr_property_request request = {
 		.hdr.owner = cpu_to_le32(PMIC_GLINK_OWNER_BATTMGR),
 		.hdr.type = cpu_to_le32(PMIC_GLINK_REQ_RESP),
@@ -1381,7 +1408,8 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
 
 	switch (opcode) {
 	case BATTMGR_BAT_PROPERTY_GET:
-		property = le32_to_cpu(resp->intval.property);
+		property = qcom_battmgr_bat_prop_from_fw(battmgr,
+				le32_to_cpu(resp->intval.property));
 		if (property == BATT_MODEL_NAME) {
 			if (payload_len != sizeof(resp->strval)) {
 				dev_warn(battmgr->dev,
@@ -1651,6 +1679,9 @@ static int qcom_battmgr_probe(struct auxiliary_device *adev,
 
 	mutex_init(&battmgr->lock);
 	init_completion(&battmgr->ack);
+
+	/* Xiaomi 12T Pro ADSP firmware (BSP enum with BATT_CONSTANT_CURRENT) */
+	battmgr->bat_prop_constant_current = of_machine_is_compatible("xiaomi,diting");
 
 	match = of_match_device(qcom_battmgr_of_variants, dev->parent);
 	if (match)
