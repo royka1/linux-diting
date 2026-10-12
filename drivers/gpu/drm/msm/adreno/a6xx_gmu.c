@@ -319,8 +319,13 @@ static int a6xx_gmu_start(struct a6xx_gmu *gmu)
 
 	gmu_write(gmu, REG_A6XX_GMU_CM3_SYSRESET, 0);
 
+	/*
+	 * Downstream allows 100 ms. The A730v3 GMU of SM8475 was measured
+	 * taking up to 12 ms to come out of reset after a power collapse
+	 * (median ~5 ms), so 10 ms failed now and then and left the GPU hung.
+	 */
 	ret = gmu_poll_timeout(gmu, REG_A6XX_GMU_CM3_FW_INIT_RESULT, val,
-		(val & mask) == reset_val, 100, 10000);
+		(val & mask) == reset_val, 100, 100000);
 
 	if (ret)
 		DRM_DEV_ERROR(gmu->dev, "GMU firmware initialization timed out\n");
