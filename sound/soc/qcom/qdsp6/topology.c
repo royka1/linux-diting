@@ -128,9 +128,27 @@ static struct audioreach_container *audioreach_tplg_alloc_container(struct q6apm
 	cont = idr_find(&apm->containers_idr, container_id);
 	mutex_unlock(&apm->lock);
 
-	if (cont) {
+	if (cont && cont->sub_graph == sg) {
 		*found = true;
 		return cont;
+	}
+
+	/*
+	 * A DSP container can host modules of several sub-graphs, also of
+	 * different graphs (e.g. a voice call renderer in the container of
+	 * the speaker endpoint, which signal-triggers it). Each sub-graph
+	 * then gets its own copy listing its modules; the graph open of
+	 * each lists the container, and the DSP reuses an existing one.
+	 */
+	if (cont) {
+		struct audioreach_container *c;
+
+		list_for_each_entry(c, &sg->container_list, node) {
+			if (c->container_id == container_id) {
+				*found = true;
+				return c;
+			}
+		}
 	}
 	*found = false;
 
@@ -141,7 +159,11 @@ static struct audioreach_container *audioreach_tplg_alloc_container(struct q6apm
 	INIT_LIST_HEAD(&cont->modules_list);
 
 	mutex_lock(&apm->lock);
-	ret = idr_alloc_u32(&apm->containers_idr, cont, &container_id, container_id, GFP_KERNEL);
+	if (idr_find(&apm->containers_idr, container_id))
+		ret = 0;	/* a per sub-graph copy, not looked up by id */
+	else
+		ret = idr_alloc_u32(&apm->containers_idr, cont, &container_id,
+				    container_id, GFP_KERNEL);
 	mutex_unlock(&apm->lock);
 
 	if (ret < 0) {
@@ -993,7 +1015,8 @@ static int audioreach_widget_unload(struct snd_soc_component *scomp,
 	if (list_empty(&cont->modules_list)) { /* if no modules in the container then remove it */
 		struct audioreach_sub_graph *sg = cont->sub_graph;
 
-		idr_remove(&apm->containers_idr, cont->container_id);
+		if (idr_find(&apm->containers_idr, cont->container_id) == cont)
+			idr_remove(&apm->containers_idr, cont->container_id);
 		list_del(&cont->node);
 		sg->num_containers--;
 		kfree(cont);
