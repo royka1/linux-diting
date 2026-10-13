@@ -13,7 +13,9 @@
 #include <dt-bindings/firmware/qcom,scm.h>
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/clock/qcom,sm8450-camcc.h>
 #include <dt-bindings/interrupt-controller/irq.h>
+#include <dt-bindings/media/video-interfaces.h>
 #include <dt-bindings/pinctrl/qcom,pmic-gpio.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 
@@ -184,6 +186,21 @@
 		state-labels = "Speaker", "Earpiece";
 		sound-name-prefix = "Top";
 		pinctrl-0 = <&top_out_sel>;
+		pinctrl-names = "default";
+	};
+
+	/* Ultrawide camera 2.8 V AVDD, switched by TLMM 6 (vendor CAMERA_ULTRA_AVDD) */
+	cam_ultra_avdd: regulator-cam-ultra-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "cam_ultra_avdd";
+		regulator-min-microvolt = <2800000>;
+		regulator-max-microvolt = <2800000>;
+		gpio = <&tlmm 6 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <100>;
+		vin-supply = <&vreg_bob>;
+
+		pinctrl-0 = <&cam_ultra_avdd_en>;
 		pinctrl-names = "default";
 	};
 
@@ -573,11 +590,63 @@
 	/*
 	 * CSIPHY rails as the vendor DT csiphy nodes: csi-vdd-0p9 is
 	 * pm8350 L5 (0.88 V, 147 mA), csi-vdd-1p2 is pm8350c L10 (1.2 V,
-	 * 59.4 mA). No sensors yet.
+	 * 59.4 mA).
 	 */
 	vdda-phy-supply = <&vreg_l5b_0p88>;
 	vdda-pll-supply = <&vreg_l10c_1p2>;
 	status = "okay";
+
+	ports {
+		/* Rear ultrawide S5K4H7, vendor csiphy-sd-index 1 */
+		port@1 {
+			csiphy1_ep: endpoint {
+				clock-lanes = <7>;
+				data-lanes = <0 1 2 3>;
+				bus-type = <MEDIA_BUS_TYPE_CSI2_DPHY>;
+				remote-endpoint = <&cam_ultra_ep>;
+			};
+		};
+	};
+};
+
+&cci0 {
+	status = "okay";
+};
+
+&cci0_i2c0 {
+	/*
+	 * Rear ultrawide: Sunny module with a Samsung S5K4H7 (vendor
+	 * qcom,cam-sensor2: CCI0 master 0, slave 0x5a, MCLK1, reset TLMM 24,
+	 * AVDD only; the module data asks for a 24 MHz MCLK). Register tables
+	 * from the module data, see firmware-xiaomi-diting.
+	 */
+	camera@2d {
+		compatible = "samsung,s5k4h7";
+		reg = <0x2d>;
+
+		clocks = <&camcc CAM_CC_MCLK1_CLK>;
+		assigned-clocks = <&camcc CAM_CC_MCLK1_CLK>;
+		assigned-clock-rates = <24000000>;
+
+		reset-gpios = <&tlmm 24 GPIO_ACTIVE_LOW>;
+		pinctrl-0 = <&cam_mclk1_default>, <&cam_ultra_reset>;
+		pinctrl-names = "default";
+
+		vdda-supply = <&cam_ultra_avdd>;
+
+		firmware-name = "qcom/sm8475/xiaomi/diting/s5k4h7-ultra.camregs";
+
+		orientation = <1>;
+		rotation = <90>;
+
+		port {
+			cam_ultra_ep: endpoint {
+				data-lanes = <1 2 3 4>;
+				link-frequencies = /bits/ 64 <330000000>;
+				remote-endpoint = <&csiphy1_ep>;
+			};
+		};
+	};
 };
 
 &remoteproc_slpi {
@@ -925,6 +994,27 @@
 &tlmm {
 	/* Secure-world owned, per qcom,gpios-reserved in the vendor DT */
 	gpio-reserved-ranges = <28 4>, <36 4>;
+
+	cam_mclk1_default: cam-mclk1-default-state {
+		pins = "gpio101";
+		function = "cam_mclk";
+		drive-strength = <6>;
+		bias-disable;
+	};
+
+	cam_ultra_avdd_en: cam-ultra-avdd-en-state {
+		pins = "gpio6";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_ultra_reset: cam-ultra-reset-state {
+		pins = "gpio24";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
 
 	spk_amp_b_reset: spk-amp-b-reset-state {
 		pins = "gpio3";
