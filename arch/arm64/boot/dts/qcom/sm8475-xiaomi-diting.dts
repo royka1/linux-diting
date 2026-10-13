@@ -702,9 +702,13 @@
 	};
 };
 
-/* Loudspeaker amplifiers: Android I2C bus 2 = QUP SE15 */
+/*
+ * Loudspeaker amplifiers: Android I2C bus 2 = QUP SE15, at 400 kHz as the
+ * vendor driver's default: loading the protection firmware writes 20 KB
+ * blocks, which at 100 kHz exceed the GENI I2C 1 s transfer timeout.
+ */
 &i2c15 {
-	clock-frequency = <100000>;
+	clock-frequency = <400000>;
 	status = "okay";
 
 	/* vendor cs35l41@40 */
