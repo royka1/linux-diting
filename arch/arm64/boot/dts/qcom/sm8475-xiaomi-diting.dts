@@ -172,6 +172,21 @@
 		};
 	};
 
+	/*
+	 * Output switch behind the top CS35L41 (vendor spk-sw-gpios on
+	 * cs35l41@42, rcv_gpio_high/low states): TLMM 52 low drives the top
+	 * loudspeaker, high the earpiece (receiver). Measured on the device:
+	 * the same tone reaches the microphones 10 dB quieter when high.
+	 */
+	top_out_mux: audio-mux-top {
+		compatible = "simple-audio-mux";
+		mux-gpios = <&tlmm 52 GPIO_ACTIVE_HIGH>;
+		state-labels = "Speaker", "Earpiece";
+		sound-name-prefix = "Top";
+		pinctrl-0 = <&top_out_sel>;
+		pinctrl-names = "default";
+	};
+
 	/* Panel 1.2 V core supply, switched by TLMM 66 (vendor display_panel_vddd) */
 	panel_vddd: regulator-panel-vddd {
 		compatible = "regulator-fixed";
@@ -718,7 +733,7 @@
 		reg = <0x42>;
 		interrupts-extended = <&tlmm 88 IRQ_TYPE_LEVEL_LOW>;
 		reset-gpios = <&tlmm 1 GPIO_ACTIVE_HIGH>;
-		pinctrl-0 = <&spk_amp_t_reset>, <&spk_amp_t_irq>, <&spk_amp_t_rcv_off>;
+		pinctrl-0 = <&spk_amp_t_reset>, <&spk_amp_t_irq>;
 		pinctrl-names = "default";
 		cirrus,boost-type = <0>;
 		cirrus,boost-peak-milliamp = <4000>;
@@ -740,6 +755,9 @@
 &sound {
 	compatible = "qcom,sm8450-sndcard";
 	model = "XIAOMI-DITING";
+
+	/* "Top MUX": top amplifier to the loudspeaker or the earpiece */
+	aux-devs = <&top_out_mux>;
 
 	pinctrl-0 = <&tert_mi2s_active>;
 	pinctrl-names = "default";
@@ -911,7 +929,7 @@
 		output-low;
 	};
 
-	spk_amp_t_rcv_off: spk-amp-t-rcv-off-state {
+	top_out_sel: top-out-sel-state {
 		pins = "gpio52";
 		function = "gpio";
 		drive-strength = <2>;
