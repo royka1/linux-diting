@@ -555,7 +555,51 @@
 	clock-frequency = <100000>;
 	status = "okay";
 
-	/* fsa4480 typec mux @ 0x42 and wl2866d camera PMIC @ 0x28: TODO */
+	/* fsa4480 typec mux @ 0x42: TODO */
+
+	/*
+	 * Camera LDOs (vendor xiaomi,wl2866d, EN on TLMM 44). Voltages are the
+	 * vendor register codes: DVDD1 0x54, DVDD2 0x64, AVDD1 0x30, AVDD2 0x98
+	 * (vendor "avdd2"). Per the vendor power-up log, AVDD1 is the 1.8 V I/O
+	 * supply of the ultrawide and front sensors, DVDD2 the ultrawide core,
+	 * DVDD1 the front core, AVDD2 the main camera.
+	 */
+	cam_ldo: pmic@28 {
+		compatible = "willsemi,wl2866d";
+		reg = <0x28>;
+		enable-gpios = <&tlmm 44 GPIO_ACTIVE_HIGH>;
+		vin1-supply = <&vreg_s12b_1p25>;
+		vin2-supply = <&vreg_bob>;
+
+		pinctrl-0 = <&cam_ldo_en>;
+		pinctrl-names = "default";
+
+		regulators {
+			cam_ldo_dvdd1: dvdd1 {
+				regulator-name = "cam_ldo_dvdd1";
+				regulator-min-microvolt = <1104000>;
+				regulator-max-microvolt = <1104000>;
+			};
+
+			cam_ldo_dvdd2: dvdd2 {
+				regulator-name = "cam_ldo_dvdd2";
+				regulator-min-microvolt = <1200000>;
+				regulator-max-microvolt = <1200000>;
+			};
+
+			cam_ldo_avdd1: avdd1 {
+				regulator-name = "cam_ldo_avdd1";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			cam_ldo_avdd2: avdd2 {
+				regulator-name = "cam_ldo_avdd2";
+				regulator-min-microvolt = <3100000>;
+				regulator-max-microvolt = <3100000>;
+			};
+		};
+	};
 
 	/*
 	 * The vendor DT uses a generic "nxp,eusb2-repeater" compatible at
@@ -617,7 +661,8 @@
 	/*
 	 * Rear ultrawide: Sunny module with a Samsung S5K4H7 (vendor
 	 * qcom,cam-sensor2: CCI0 master 0, slave 0x5a, MCLK1, reset TLMM 24,
-	 * AVDD only; the module data asks for a 24 MHz MCLK). Register tables
+	 * AVDD; I/O and core from the WL2866D, power types 0xf/0xe in the
+	 * module data; the module data asks for a 24 MHz MCLK). Register tables
 	 * from the module data, see firmware-xiaomi-diting.
 	 */
 	camera@2d {
@@ -633,6 +678,8 @@
 		pinctrl-names = "default";
 
 		vdda-supply = <&cam_ultra_avdd>;
+		vddd-supply = <&cam_ldo_dvdd2>;
+		vddio-supply = <&cam_ldo_avdd1>;
 
 		firmware-name = "qcom/sm8475/xiaomi/diting/s5k4h7-ultra.camregs";
 
@@ -994,6 +1041,13 @@
 &tlmm {
 	/* Secure-world owned, per qcom,gpios-reserved in the vendor DT */
 	gpio-reserved-ranges = <28 4>, <36 4>;
+
+	cam_ldo_en: cam-ldo-en-state {
+		pins = "gpio44";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
 
 	cam_mclk1_default: cam-mclk1-default-state {
 		pins = "gpio101";
