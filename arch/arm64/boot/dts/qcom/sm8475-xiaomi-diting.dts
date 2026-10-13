@@ -569,6 +569,15 @@
 	status = "okay";
 };
 
+&remoteproc_slpi {
+	/*
+	 * Sensor DSP; squashed from the vendor firmware_mnt slpi.mdt + slpi.bNN.
+	 * Carveout as the vendor DT (slpi_region@88000000, 0x1900000).
+	 */
+	firmware-name = "qcom/sm8475/xiaomi/diting/slpi.mbn";
+	status = "okay";
+};
+
 &remoteproc_mpss {
 	/* squashed from the vendor firmware_mnt modem.mdt + modem.bNN */
 	firmware-name = "qcom/sm8475/xiaomi/diting/modem.mbn";
