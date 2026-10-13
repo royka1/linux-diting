@@ -684,7 +684,12 @@
 		firmware-name = "qcom/sm8475/xiaomi/diting/s5k4h7-ultra.camregs";
 
 		orientation = <1>;
-		rotation = <90>;
+		/*
+		 * Upright with the readout orientation the module data uses
+		 * (mirror + flip); 90 (from the vendor sensor-position roll)
+		 * shows the image upside down in GNOME Snapshot.
+		 */
+		rotation = <270>;
 
 		port {
 			cam_ultra_ep: endpoint {
