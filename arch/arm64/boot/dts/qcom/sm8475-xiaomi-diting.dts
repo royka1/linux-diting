@@ -745,6 +745,18 @@
 	 * WL2866D AVDD2 (type 0x10), AVDD1 (0xf, 1.8 V I/O), AVDD 2.9 V,
 	 * DVDD 1.1 V, reset release, MCLK. C-PHY, three trios.
 	 */
+	/*
+	 * Lens actuator of the main camera: AK7314 at 0x0c (module data
+	 * diting_semco_s5khp1_ak7314_wide_actuator: 10-bit position << 6 in
+	 * register 0, mode register 2, powered from WL2866D AVDD2 and AVDD1).
+	 */
+	cam_wide_lens: actuator@c {
+		compatible = "asahi-kasei,ak7314";
+		reg = <0x0c>;
+		vdd-supply = <&cam_ldo_avdd2>;
+		vio-supply = <&cam_ldo_avdd1>;
+	};
+
 	camera@10 {
 		compatible = "samsung,s5khp1";
 		reg = <0x10>;
@@ -762,6 +774,8 @@
 		vdda-supply = <&cam_wide_avdd>;
 		vddd-supply = <&cam_wide_dvdd>;
 
+		lens-focus = <&cam_wide_lens>;
+
 		firmware-name = "qcom/sm8475/xiaomi/diting/s5khp1-wide.camregs";
 
 		orientation = <1>;
@@ -775,6 +789,14 @@
 				remote-endpoint = <&csiphy2_ep>;
 			};
 		};
+	};
+
+	/* Main camera module EEPROM (vendor eeprom0, P24C128F), read-only */
+	eeprom@51 {
+		compatible = "puya,p24c128f", "atmel,24c128";
+		reg = <0x51>;
+		vcc-supply = <&cam_ldo_avdd1>;
+		read-only;
 	};
 };
 
