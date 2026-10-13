@@ -803,6 +803,17 @@ config VIDEO_S5K4H7
 	  To compile this driver as a module, choose M here: the
 	  module will be called s5k4h7.
 
+config VIDEO_S5KHP1
+	tristate "Samsung S5KHP1 sensor support"
+	select V4L2_CCI_I2C
+	help
+	  This is a V4L2 sensor driver for the Samsung S5KHP1 (ISOCELL HP1)
+	  200MP raw camera sensor with a MIPI C-PHY output. The sensor
+	  register tables are loaded as firmware.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called s5khp1.
+
 config VIDEO_S5KJN1
 	tristate "Samsung S5KJN1 sensor support"
 	select V4L2_CCI_I2C
