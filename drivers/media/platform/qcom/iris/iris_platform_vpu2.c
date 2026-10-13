@@ -29,7 +29,7 @@ static const struct iris_firmware_desc iris_vpu20_p4_gen1_desc = {
 };
 
 static const struct iris_firmware_desc iris_vpu20_p4_gen2_desc = {
-	.firmware_data = &iris_hfi_gen2_data,
+	.firmware_data = &iris_hfi_gen2_vpu2_data,
 	.get_vpu_buffer_size = iris_vpu_buf_size,
 	.fwname = "qcom/vpu/vpu20_p4_gen2.mbn",
 };

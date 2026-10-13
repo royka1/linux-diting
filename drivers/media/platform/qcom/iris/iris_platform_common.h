@@ -52,6 +52,7 @@ enum pipe_type {
 
 extern const struct iris_firmware_data iris_hfi_gen1_data;
 extern const struct iris_firmware_data iris_hfi_gen2_data;
+extern const struct iris_firmware_data iris_hfi_gen2_vpu2_data;
 
 extern const struct iris_platform_data qcs8300_data;
 extern const struct iris_platform_data sc7280_data;
@@ -280,6 +281,9 @@ struct iris_firmware_data {
 	unsigned int enc_ip_int_buf_tbl_size;
 	const u32 *enc_op_int_buf_tbl;
 	unsigned int enc_op_int_buf_tbl_size;
+
+	/* HFI_CMD_RESUME without payload (Gen2 firmware of VPU 2.0 SoCs) */
+	bool resume_without_payload;
 };
 
 struct iris_firmware_desc {

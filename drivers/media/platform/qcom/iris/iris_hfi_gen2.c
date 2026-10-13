@@ -1053,68 +1053,83 @@ static const u32 sm8550_enc_op_int_buf_tbl[] = {
 	BUF_SCRATCH_2,
 };
 
+static const u32 sm8450_dec_ip_int_buf_tbl[] = {
+	BUF_BIN,
+	BUF_COMV,
+	BUF_NON_COMV,
+	BUF_LINE,
+};
+
+#define IRIS_HFI_GEN2_COMMON_DATA \
+	.init_hfi_ops = iris_hfi_gen2_sys_ops_init, \
+	.core_arch = VIDEO_ARCH_LX, \
+	.inst_fw_caps_dec = inst_fw_cap_sm8550_dec, \
+	.inst_fw_caps_dec_size = ARRAY_SIZE(inst_fw_cap_sm8550_dec), \
+	.inst_fw_caps_enc = inst_fw_cap_sm8550_enc, \
+	.inst_fw_caps_enc_size = ARRAY_SIZE(inst_fw_cap_sm8550_enc), \
+	.dec_input_config_params_default = \
+		sm8550_vdec_input_config_params_default, \
+	.dec_input_config_params_default_size = \
+		ARRAY_SIZE(sm8550_vdec_input_config_params_default), \
+	.dec_input_config_params_hevc = \
+		sm8550_vdec_input_config_param_hevc, \
+	.dec_input_config_params_hevc_size = \
+		ARRAY_SIZE(sm8550_vdec_input_config_param_hevc), \
+	.dec_input_config_params_vp9 = \
+		sm8550_vdec_input_config_param_vp9, \
+	.dec_input_config_params_vp9_size = \
+		ARRAY_SIZE(sm8550_vdec_input_config_param_vp9), \
+	.dec_input_config_params_av1 = \
+		sm8550_vdec_input_config_param_av1, \
+	.dec_input_config_params_av1_size = \
+		ARRAY_SIZE(sm8550_vdec_input_config_param_av1), \
+	.dec_output_config_params = \
+		sm8550_vdec_output_config_params, \
+	.dec_output_config_params_size = \
+		ARRAY_SIZE(sm8550_vdec_output_config_params), \
+	.enc_input_config_params = \
+		sm8550_venc_input_config_params, \
+	.enc_input_config_params_size = \
+		ARRAY_SIZE(sm8550_venc_input_config_params), \
+	.enc_output_config_params = \
+		sm8550_venc_output_config_params, \
+	.enc_output_config_params_size = \
+		ARRAY_SIZE(sm8550_venc_output_config_params), \
+	.dec_input_prop = sm8550_vdec_subscribe_input_properties, \
+	.dec_input_prop_size = ARRAY_SIZE(sm8550_vdec_subscribe_input_properties), \
+	.dec_output_prop_avc = sm8550_vdec_subscribe_output_properties_avc, \
+	.dec_output_prop_avc_size = \
+		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_avc), \
+	.dec_output_prop_hevc = sm8550_vdec_subscribe_output_properties_hevc, \
+	.dec_output_prop_hevc_size = \
+		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_hevc), \
+	.dec_output_prop_vp9 = sm8550_vdec_subscribe_output_properties_vp9, \
+	.dec_output_prop_vp9_size = \
+		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_vp9), \
+	.dec_output_prop_av1 = sm8550_vdec_subscribe_output_properties_av1, \
+	.dec_output_prop_av1_size = \
+		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_av1), \
+	.dec_op_int_buf_tbl = sm8550_dec_op_int_buf_tbl, \
+	.dec_op_int_buf_tbl_size = ARRAY_SIZE(sm8550_dec_op_int_buf_tbl), \
+	.enc_ip_int_buf_tbl = sm8550_enc_ip_int_buf_tbl, \
+	.enc_ip_int_buf_tbl_size = ARRAY_SIZE(sm8550_enc_ip_int_buf_tbl), \
+	.enc_op_int_buf_tbl = sm8550_enc_op_int_buf_tbl, \
+	.enc_op_int_buf_tbl_size = ARRAY_SIZE(sm8550_enc_op_int_buf_tbl)
+
 const struct iris_firmware_data iris_hfi_gen2_data = {
-	.init_hfi_ops = iris_hfi_gen2_sys_ops_init,
-
-	.core_arch = VIDEO_ARCH_LX,
-
-	.inst_fw_caps_dec = inst_fw_cap_sm8550_dec,
-	.inst_fw_caps_dec_size = ARRAY_SIZE(inst_fw_cap_sm8550_dec),
-	.inst_fw_caps_enc = inst_fw_cap_sm8550_enc,
-	.inst_fw_caps_enc_size = ARRAY_SIZE(inst_fw_cap_sm8550_enc),
-
-	.dec_input_config_params_default =
-		sm8550_vdec_input_config_params_default,
-	.dec_input_config_params_default_size =
-		ARRAY_SIZE(sm8550_vdec_input_config_params_default),
-	.dec_input_config_params_hevc =
-		sm8550_vdec_input_config_param_hevc,
-	.dec_input_config_params_hevc_size =
-		ARRAY_SIZE(sm8550_vdec_input_config_param_hevc),
-	.dec_input_config_params_vp9 =
-		sm8550_vdec_input_config_param_vp9,
-	.dec_input_config_params_vp9_size =
-		ARRAY_SIZE(sm8550_vdec_input_config_param_vp9),
-	.dec_input_config_params_av1 =
-		sm8550_vdec_input_config_param_av1,
-	.dec_input_config_params_av1_size =
-		ARRAY_SIZE(sm8550_vdec_input_config_param_av1),
-	.dec_output_config_params =
-		sm8550_vdec_output_config_params,
-	.dec_output_config_params_size =
-		ARRAY_SIZE(sm8550_vdec_output_config_params),
-
-	.enc_input_config_params =
-		sm8550_venc_input_config_params,
-	.enc_input_config_params_size =
-		ARRAY_SIZE(sm8550_venc_input_config_params),
-	.enc_output_config_params =
-		sm8550_venc_output_config_params,
-	.enc_output_config_params_size =
-		ARRAY_SIZE(sm8550_venc_output_config_params),
-
-	.dec_input_prop = sm8550_vdec_subscribe_input_properties,
-	.dec_input_prop_size = ARRAY_SIZE(sm8550_vdec_subscribe_input_properties),
-	.dec_output_prop_avc = sm8550_vdec_subscribe_output_properties_avc,
-	.dec_output_prop_avc_size =
-		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_avc),
-	.dec_output_prop_hevc = sm8550_vdec_subscribe_output_properties_hevc,
-	.dec_output_prop_hevc_size =
-		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_hevc),
-	.dec_output_prop_vp9 = sm8550_vdec_subscribe_output_properties_vp9,
-	.dec_output_prop_vp9_size =
-		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_vp9),
-	.dec_output_prop_av1 = sm8550_vdec_subscribe_output_properties_av1,
-	.dec_output_prop_av1_size =
-		ARRAY_SIZE(sm8550_vdec_subscribe_output_properties_av1),
-
+	IRIS_HFI_GEN2_COMMON_DATA,
 	.dec_ip_int_buf_tbl = sm8550_dec_ip_int_buf_tbl,
 	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8550_dec_ip_int_buf_tbl),
-	.dec_op_int_buf_tbl = sm8550_dec_op_int_buf_tbl,
-	.dec_op_int_buf_tbl_size = ARRAY_SIZE(sm8550_dec_op_int_buf_tbl),
+};
 
-	.enc_ip_int_buf_tbl = sm8550_enc_ip_int_buf_tbl,
-	.enc_ip_int_buf_tbl_size = ARRAY_SIZE(sm8550_enc_ip_int_buf_tbl),
-	.enc_op_int_buf_tbl = sm8550_enc_op_int_buf_tbl,
-	.enc_op_int_buf_tbl_size = ARRAY_SIZE(sm8550_enc_op_int_buf_tbl),
+/*
+ * Gen2 firmware of the VPU 2.0 core (SM8450, SM8475): no partial data
+ * buffer, and HFI_CMD_RESUME is sent without a payload, as the vendor
+ * driver does. With a payload the firmware does not resume decoding.
+ */
+const struct iris_firmware_data iris_hfi_gen2_vpu2_data = {
+	IRIS_HFI_GEN2_COMMON_DATA,
+	.dec_ip_int_buf_tbl = sm8450_dec_ip_int_buf_tbl,
+	.dec_ip_int_buf_tbl_size = ARRAY_SIZE(sm8450_dec_ip_int_buf_tbl),
+	.resume_without_payload = true,
 };
