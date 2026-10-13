@@ -678,6 +678,15 @@
 				remote-endpoint = <&cam_ultra_ep>;
 			};
 		};
+
+		/* Rear main S5KHP1, vendor csiphy-sd-index 2: three C-PHY trios */
+		port@2 {
+			csiphy2_ep: endpoint {
+				data-lanes = <0 1 2>;
+				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
+				remote-endpoint = <&cam_wide_ep>;
+			};
+		};
 	};
 };
 
@@ -735,8 +744,6 @@
 	 * reset TLMM 126, CSIPHY 2). Power-up order of the module data:
 	 * WL2866D AVDD2 (type 0x10), AVDD1 (0xf, 1.8 V I/O), AVDD 2.9 V,
 	 * DVDD 1.1 V, reset release, MCLK. C-PHY, three trios.
-	 *
-	 * Not linked to CAMSS yet: mainline CAMSS has no C-PHY support.
 	 */
 	camera@10 {
 		compatible = "samsung,s5khp1";
@@ -765,6 +772,7 @@
 				bus-type = <MEDIA_BUS_TYPE_CSI2_CPHY>;
 				data-lanes = <1 2 3>;
 				link-frequencies = /bits/ 64 <848526000 1042384000 1194928000>;
+				remote-endpoint = <&csiphy2_ep>;
 			};
 		};
 	};
