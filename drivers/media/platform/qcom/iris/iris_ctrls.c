@@ -22,6 +22,10 @@ static inline bool iris_valid_cap_id(enum platform_inst_fw_cap_type cap_id)
 static enum platform_inst_fw_cap_type iris_get_cap_id(u32 id)
 {
 	switch (id) {
+	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE:
+		return DISPLAY_DELAY_ENABLE;
+	case V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY:
+		return DISPLAY_DELAY;
 	case V4L2_CID_MPEG_VIDEO_H264_PROFILE:
 		return PROFILE_H264;
 	case V4L2_CID_MPEG_VIDEO_HEVC_PROFILE:
@@ -165,6 +169,10 @@ static u32 iris_get_v4l2_id(enum platform_inst_fw_cap_type cap_id)
 		return 0;
 
 	switch (cap_id) {
+	case DISPLAY_DELAY_ENABLE:
+		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY_ENABLE;
+	case DISPLAY_DELAY:
+		return V4L2_CID_MPEG_VIDEO_DEC_DISPLAY_DELAY;
 	case PROFILE_H264:
 		return V4L2_CID_MPEG_VIDEO_H264_PROFILE;
 	case PROFILE_HEVC:
@@ -505,6 +513,27 @@ int iris_set_u32(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
 					     iris_get_port_info(inst, cap_id),
 					     HFI_PAYLOAD_U32,
 					     &hfi_value, sizeof(u32));
+}
+
+/*
+ * A display delay of 0 asks for pictures in decode order: each frame is
+ * returned as soon as it is decoded instead of after reordering. The
+ * firmware default (display order) is left alone otherwise.
+ */
+int iris_set_decode_order(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
+{
+	const struct iris_hfi_session_ops *hfi_ops = inst->hfi_session_ops;
+	u32 hfi_id = inst->fw_caps[cap_id].hfi_id;
+	u32 decode_order = 1;
+
+	if (!inst->fw_caps[DISPLAY_DELAY_ENABLE].value || inst->fw_caps[DISPLAY_DELAY].value)
+		return 0;
+
+	return hfi_ops->session_set_property(inst, hfi_id,
+					     HFI_HOST_FLAGS_NONE,
+					     iris_get_port_info(inst, cap_id),
+					     HFI_PAYLOAD_U32,
+					     &decode_order, sizeof(u32));
 }
 
 int iris_set_stage(struct iris_inst *inst, enum platform_inst_fw_cap_type cap_id)
