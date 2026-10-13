@@ -569,6 +569,17 @@
 	status = "okay";
 };
 
+&camss {
+	/*
+	 * CSIPHY rails as the vendor DT csiphy nodes: csi-vdd-0p9 is
+	 * pm8350 L5 (0.88 V, 147 mA), csi-vdd-1p2 is pm8350c L10 (1.2 V,
+	 * 59.4 mA). No sensors yet.
+	 */
+	vdda-phy-supply = <&vreg_l5b_0p88>;
+	vdda-pll-supply = <&vreg_l10c_1p2>;
+	status = "okay";
+};
+
 &remoteproc_slpi {
 	/*
 	 * Sensor DSP; squashed from the vendor firmware_mnt slpi.mdt + slpi.bNN.
