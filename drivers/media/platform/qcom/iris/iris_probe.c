@@ -281,9 +281,11 @@ static int iris_probe(struct platform_device *pdev)
 	if (ret)
 		goto err_v4l2_unreg;
 
-	ret = iris_register_video_device(core, ENCODER);
-	if (ret)
-		goto err_vdev_unreg_dec;
+	if (!core->iris_platform_data->no_encoder) {
+		ret = iris_register_video_device(core, ENCODER);
+		if (ret)
+			goto err_vdev_unreg_dec;
+	}
 
 	platform_set_drvdata(pdev, core);
 
