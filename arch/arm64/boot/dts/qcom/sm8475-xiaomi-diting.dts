@@ -658,6 +658,13 @@
 	status = "okay";
 };
 
+&iris {
+	/* vendor: vidc,firmware-name = "vpu20_4v" (video-firmware.2.4) */
+	firmware-name = "qcom/sm8475/xiaomi/diting/vpu20_4v.mbn";
+
+	status = "okay";
+};
+
 &camss {
 	/*
 	 * CSIPHY rails as the vendor DT csiphy nodes: csi-vdd-0p9 is
