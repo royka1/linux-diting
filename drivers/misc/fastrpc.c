@@ -1278,7 +1278,15 @@ static int fastrpc_internal_invoke(struct fastrpc_user *fl,  u32 kernel,
 		if (!wait_for_completion_timeout(&ctx->work, 10 * HZ))
 			err = -ETIMEDOUT;
 	} else {
-		err = wait_for_completion_interruptible(&ctx->work);
+		/*
+		 * Freezable: the freezer must not interrupt the wait. On
+		 * -ERESTARTSYS the context stays queued on the DSP and the
+		 * restarted ioctl sends a second one; the DSP then completes the
+		 * orphaned context and its reply (for a listener thread: the
+		 * DSP's next reverse-RPC request) is lost, once per suspend.
+		 */
+		err = wait_for_completion_state(&ctx->work,
+						TASK_INTERRUPTIBLE | TASK_FREEZABLE);
 	}
 
 	if (err)
