@@ -69,15 +69,24 @@ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
 		 * The DSP provides bit clock and frame sync; codecs follow.
 		 * With several codecs on one link (e.g. a pair of speaker
 		 * amplifiers), codec N takes slot N: left, right, ...
+		 *
+		 * A stereo pair also gets the other channel as its second
+		 * receive slot, as the vendor CS35L41 driver programs it
+		 * (cirrus,right-channel-amp: RX1 = 1, RX2 = 0). The speaker
+		 * protection firmware takes RX2 as the opposite channel; left
+		 * at its reset default (slot 1) the right amplifier receives
+		 * its own channel twice and the firmware keeps it silent.
 		 */
 		for_each_rtd_codec_dais(rtd, i, codec_dai) {
-			unsigned int slot = i;
+			unsigned int slots[2] = { i, !i };
 
 			snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_CBC_CFC |
 					    SND_SOC_DAIFMT_I2S |
 					    SND_SOC_DAIFMT_NB_NF);
-			if (rtd->dai_link->num_codecs > 1)
-				snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 1, &slot);
+			if (rtd->dai_link->num_codecs == 2)
+				snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 2, slots);
+			else if (rtd->dai_link->num_codecs > 2)
+				snd_soc_dai_set_channel_map(codec_dai, 0, NULL, 1, slots);
 		}
 		break;
 	case WSA_CODEC_DMA_RX_0:
