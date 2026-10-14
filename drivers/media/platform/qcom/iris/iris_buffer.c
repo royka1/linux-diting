@@ -928,9 +928,13 @@ static void iris_get_ts_metadata(struct iris_inst *inst, u64 timestamp_ns,
 		return;
 	}
 
+	/*
+	 * No input buffer carried this timestamp (for example an empty buffer
+	 * returned for a frame that is not shown). metadata_idx is the next
+	 * slot to write and can be one past the end of tss[], so there is no
+	 * metadata to copy.
+	 */
 	vbuf->flags &= ~mask;
-	vbuf->flags |= inst->tss[inst->metadata_idx].flags;
-	vbuf->timecode = inst->tss[inst->metadata_idx].tc;
 }
 
 int iris_vb2_buffer_done(struct iris_inst *inst, struct iris_buffer *buf)
