@@ -1115,6 +1115,8 @@
 		compatible = "pci17cb,1103";
 		reg = <0x10000 0x0 0x0 0x0 0x0>;
 
+		qcom,calibration-variant = "Xiaomi_diting";
+
 		vddrfacmn-supply = <&vreg_pmu_rfa_cmn_0p8>;
 		vddaon-supply = <&vreg_pmu_aon_0p8>;
 		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
