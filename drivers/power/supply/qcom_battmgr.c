@@ -1461,7 +1461,12 @@ static void qcom_battmgr_sm8350_callback(struct qcom_battmgr *battmgr,
 			battmgr->info.voltage_max = le32_to_cpu(resp->intval.value);
 			break;
 		case BATT_CURR_NOW:
-			battmgr->status.current_now = le32_to_cpu(resp->intval.value);
+			/*
+			 * The firmware reports charging current as negative,
+			 * the ABI wants it positive (upower takes a negative
+			 * current as discharging, whatever the status says).
+			 */
+			battmgr->status.current_now = -(int)le32_to_cpu(resp->intval.value);
 			break;
 		case BATT_TEMP:
 			val = le32_to_cpu(resp->intval.value);
