@@ -1485,7 +1485,12 @@ static const struct adreno_info a7xx_gpus[] = {
 			[ADRENO_FW_GMU] = "gmu_gen70000.bin",
 		},
 		.gmem = SZ_2M,
-		.inactive_period = DRM_MSM_INACTIVE_PERIOD,
+		/*
+		 * The GMU sometimes stops answering the GPU_SET OOB request
+		 * when the GPU powers up, and then never initialises again.
+		 * Power the GPU down less often.
+		 */
+		.inactive_period = 1000,
 		.quirks = ADRENO_QUIRK_HAS_CACHED_COHERENT |
 			  ADRENO_QUIRK_HAS_HW_APRIV |
 			  ADRENO_QUIRK_PREEMPTION,
