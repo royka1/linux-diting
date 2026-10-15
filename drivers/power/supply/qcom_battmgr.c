@@ -100,6 +100,9 @@ enum qcom_battmgr_variant {
 #define WLS_BOOST_EN			6
 
 #define BATTMGR_CHG_CTRL_LIMIT_EN	0x48
+
+/* Unsolicited vendor status broadcast of the Xiaomi charger firmware */
+#define BATTMGR_XIAOMI_STATUS		0x50
 #define CHARGE_CTRL_START_THR_MIN	50
 #define CHARGE_CTRL_START_THR_MAX	95
 #define CHARGE_CTRL_END_THR_MIN		55
@@ -1244,6 +1247,9 @@ static void qcom_battmgr_notification(struct qcom_battmgr *battmgr,
 	case NOTIF_WLS_PROPERTY:
 		power_supply_changed(battmgr->wls_psy);
 		break;
+	case BATTMGR_XIAOMI_STATUS:
+		/* Xiaomi vendor properties changed; none of them are exported */
+		break;
 	default:
 		dev_err(battmgr->dev, "unknown notification: %#x\n", notification);
 		break;
@@ -1607,6 +1613,14 @@ static void qcom_battmgr_callback(const void *data, size_t len, void *priv)
 	const struct pmic_glink_hdr *hdr = data;
 	struct qcom_battmgr *battmgr = priv;
 	unsigned int opcode = le32_to_cpu(hdr->opcode);
+
+	/*
+	 * Xiaomi firmware broadcasts its own status block every few minutes.
+	 * It is not a reply to a request, so it must not complete the ack of
+	 * a request that is in flight.
+	 */
+	if (opcode == BATTMGR_XIAOMI_STATUS)
+		return;
 
 	if (opcode == BATTMGR_NOTIFICATION)
 		qcom_battmgr_notification(battmgr, data, len);
