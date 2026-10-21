@@ -817,6 +817,25 @@
 	status = "okay";
 };
 
+/*
+ * The SLPI firmware reads the "sleepstate" smp2p entry to know whether
+ * the application processor is suspended (vendor DT: qcom,smp2p-dsps
+ * sleepstate-out and qcom,smp2p_sleepstate).
+ */
+&{/smp2p-slpi} {
+	smp2p_slpi_sleepstate_out: sleepstate {
+		qcom,entry-name = "sleepstate";
+		#qcom,smem-state-cells = <1>;
+	};
+};
+
+/ {
+	smp2p-sleepstate {
+		compatible = "qcom,smp2p-sleepstate";
+		qcom,smem-states = <&smp2p_slpi_sleepstate_out 0>;
+	};
+};
+
 &remoteproc_mpss {
 	/* squashed from the vendor firmware_mnt modem.mdt + modem.bNN */
 	firmware-name = "qcom/sm8475/xiaomi/diting/modem.mbn";
