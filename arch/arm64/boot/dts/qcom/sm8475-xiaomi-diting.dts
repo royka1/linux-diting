@@ -823,6 +823,17 @@
 	status = "okay";
 };
 
+&remoteproc_cdsp {
+	/*
+	 * Compute DSP (Hexagon with HVX/HTP); squashed from the vendor
+	 * firmware_mnt cdsp.mdt + cdsp.bNN. Carveout as the vendor DT
+	 * (cdsp_region@89900000, 0x2000000), compute context banks with
+	 * the same SIDs as the vendor DT (0x2161..0x2168).
+	 */
+	firmware-name = "qcom/sm8475/xiaomi/diting/cdsp.mbn";
+	status = "okay";
+};
+
 &remoteproc_adsp {
 	/* squashed from the vendor firmware_mnt adsp.mdt + adsp.bNN */
 	firmware-name = "qcom/sm8475/xiaomi/diting/adsp.mbn";
